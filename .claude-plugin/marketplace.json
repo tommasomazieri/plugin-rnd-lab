@@ -1,0 +1,16 @@
+{
+  "name": "plugin-rnd-lab",
+  "owner": {
+    "name": "tomin"
+  },
+  "metadata": {
+    "description": "Lab marketplace for plugin R&D tooling — instruments for testing, measuring, and iterating Claude Code plugins."
+  },
+  "plugins": [
+    {
+      "name": "ab-bench",
+      "source": "./plugins/ab-bench",
+      "description": "Control-vs-plugin A/B testing harness: creates experiment environments, fires paired sessions with everything-else-equal configs, analyzes both session JSONLs + DoD logs + human verdict into an evidence-backed improvement report."
+    }
+  ]
+}

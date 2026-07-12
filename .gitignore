@@ -1,0 +1,11 @@
+# local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# dod-lite tracking state for THIS repo's own dev sessions (not part of the shipped plugin)
+.dod/
+
+# crash artifacts
+*.stackdump
+
+# node
+node_modules/

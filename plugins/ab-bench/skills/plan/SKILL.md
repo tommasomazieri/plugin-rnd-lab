@@ -1,0 +1,128 @@
+---
+description: >-
+  Plan the next A/B run of an ab-bench experiment: write the task brief (task.md, the
+  identical opening assignment both arms receive) and author REAL Definition-of-Done
+  checks BEFORE firing — working script/prompt/human check files (dod-lite's exact
+  format), reusing the plugin-under-test's own checker scripts where it ships them.
+  Auto-trigger when the user says: "plan the next run", "plan run 2", "define the task for
+  the ab test", "write the task brief", "set up the next iteration", "prepare the next
+  ab-bench run", "define DoDs for the experiment". Creates runs/run-NNN/task.md and
+  runs/run-NNN/dod-checks.json, writes check files into .dod/checks/. Must run before
+  /ab-bench:fire.
+argument-hint: "[experiment-name]"
+---
+
+# ab-bench: plan next run
+
+Experiments live in `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\`. Identify the
+experiment from $ARGUMENTS or ask. Read its `env.json` and `ledger.md` for context — if a prior
+run's report exists, its "Recommendations for next iteration" section should shape this run.
+
+## 1. Create the run folder
+
+Next number: scan `runs/`, take highest `run-NNN` + 1 (start at `run-001`). Create `runs/run-NNN/`.
+
+## 2. Write task.md — THE PARITY-CRITICAL ARTIFACT
+
+`task.md` is copied verbatim into both workspaces as `TASK.md` and both arms open with the same
+fixed prompt telling them to execute it. Rules:
+
+- **Plugin-blind**: the brief must NEVER mention the plugin under test, its tools, or hint at a
+  preferred workflow. It describes the JOB (what to build/produce, acceptance criteria, constraints),
+  as a real user would state it to either setup. One mention of the plugin = contaminated run.
+- Self-contained: assume the reading agent has ONLY this file plus the seed files.
+- Concrete deliverables: name the output files/artifacts expected in the workspace.
+- Same task complexity as prior runs if iterating (comparable ledger rows); note in the ledger if
+  task difficulty changed.
+
+Draft it, show the user, iterate until approved.
+
+## 3. Define REAL DoD checks — no placeholders
+
+The DoD checks are the pre-registered success criteria — defined NOW, in the main session, before
+any output exists, so post-hoc rationalization can't creep in. Every check file you write here is
+executed FOR REAL by dod-lite's `Stop` hook, every turn, in both arm sessions. Never write a
+placeholder/invented check "to fill the schema" — if a criterion can't be checked for real yet,
+leave it out and say so.
+
+Full schema and rationale: `${CLAUDE_SKILL_DIR}/../../docs/dod-contract.md`. Read it if unsure of
+dod-lite's exact file formats before writing anything.
+
+### 3a. Interview for criteria (same rigor as dod-lite's own planning skill)
+
+Draft candidate criteria that would actually distinguish "done" from "not done" for THIS task. For
+each, decide the tier:
+- **script** — mechanically verifiable by exit code (file exists, build passes, output validates).
+  Prefer this whenever possible.
+- **prompt** — needs judgement but a read-only AI grader could resolve it by investigating.
+- **human** — genuinely needs this user's judgement (taste, "does this match the ask"). Use sparingly.
+
+Present the list (what + tier, not draft file contents yet) to the user, iterate until agreed —
+same proposal-then-author order as dod-lite's `planning` skill. Zero checks can be a legitimate
+outcome for a trivial task.
+
+### 3b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
+
+For each agreed criterion, look at the plugin-under-test's repo (path from env.json
+`plugin_under_test` / test arm's `pluginDirs`) for checker-like tooling it already ships: a
+`checks/`, `qa/`, `validators/`, or similarly-named folder, or anything its README/SKILL.md
+documents as QA/validation scripts meant to grade its own output (e.g. a Blender plugin shipping
+mesh-validation scripts). If a plugin-native script already covers a criterion:
+- use it INSTEAD of writing a generic one for that criterion.
+- it goes to the **test arm only** (control doesn't have the plugin, so it can't run a checker that
+  depends on the plugin's own tooling) — unless a generic equivalent can meaningfully assess the same
+  criterion without the plugin, in which case give control that generic version instead.
+- this means control and test CAN legitimately end up with different check-id lists. That's expected
+  when driven by a plugin-native checker, not a parity violation — record `source` (see 3d) so
+  `/ab-bench:analyze` explains it instead of flagging it.
+
+List `.dod/checks/` first (same as dod-lite's own skill) — reuse an existing id if a prior run
+already covers the same intent, don't duplicate.
+
+### 3c. Author real check files into `<experiment>/.dod/checks/`
+
+dod-lite's exact format (id = filename without extension, unique within `checks/`):
+- **script**: `<id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb` — actual working exit-code logic (0 = pass). If
+  reusing a plugin-native script, copy it in verbatim (or reference it if it needs no changes to run
+  standalone).
+- **prompt** / **human**: `<id>.md` with frontmatter:
+  ```yaml
+  ---
+  type: prompt        # or: human
+  description: "one line, shown in status/failure output"
+  model: haiku         # prompt only, default haiku, sonnet for nuanced calls
+  ---
+  <self-contained grading question (prompt) or question-for-user (human)>
+  ```
+  A `prompt` checker runs with only read-only repo access and no conversation context — write the
+  question so it states what "done" looks like, not just "did we do the thing."
+
+### 3d. Write `runs/run-NNN/dod-checks.json` — the per-run artifact
+
+This lives in the RUN folder, NOT in `.dod/` — which checks apply to this run is task-specific, the
+check FILES in `.dod/checks/` are the experiment-level shared/reused state.
+
+```json
+{
+  "schema": 1,
+  "run": "run-NNN",
+  "checks": {
+    "control": [ { "id": "...", "tier": "script|prompt|human", "source": "generic" } ],
+    "test":    [ { "id": "...", "tier": "script|prompt|human", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ]
+  }
+}
+```
+
+The `arm-session-start.mjs` hook reads this file at fire time and seeds each arm's
+`.dod/sessions/<session_id>.json` with exactly this list — that's what makes checks apply seamlessly
+without either arm ever needing to invoke `dod-lite:planning` itself.
+
+If the user wants to skip DoD tracking for this run entirely: don't write `dod-checks.json` at all
+(ab-bench degrades gracefully — analysis then leans on metrics + human verdict only). Say so plainly
+before moving on.
+
+## 4. Confirm ready
+
+Tell the user: `run-NNN planned. Fire with /ab-bench:fire when ready.`
+Checklist to state: task.md written (plugin-blind ✓), `dod-checks.json` present (with control/test
+counts and any plugin-native checks called out) or explicitly skipped.
