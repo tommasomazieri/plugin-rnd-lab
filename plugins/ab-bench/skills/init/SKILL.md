@@ -45,6 +45,11 @@ Collect, unless already given in $ARGUMENTS or conversation:
 4. **Common config** — plugins/MCPs BOTH arms share (caveman, context7, ...). Everything both arms need must be declared here; arms must not rely on global config (arms run `--strict-mcp-config` and explicit `enabledPlugins`).
 5. **Model** — one model, both arms. No exceptions.
 6. **Seed files** — starting files both workspaces should begin with (can be empty).
+7. **Plugin-under-test's own git repo path** (optional) — the repo `pluginDirs`/`plugins` point at, IF
+   it's a git repo. Enables previous-version baselines later (`/ab-bench:plan` can pin control to an old
+   tag/commit instead of vanilla — see "Previous-version baselines" below). Skip if not a git repo yet
+   or you don't expect to need this; it can be added later by hand-editing `pluginUnderTestRepo` into
+   env.json (not itself part of the "never edit env.json" lock — it's metadata, not an arm config delta).
 
 For MCP entries: collect the full server definition (command/args/env), not just the name —
 launch composes per-arm `--mcp-config` files from the `mcpServers` pool in env.json.
@@ -71,6 +76,7 @@ env.json schema (schema 1):
   "created": "<ISO date>",
   "model": "<model>",
   "mode": "interactive",
+  "pluginUnderTestRepo": "<absolute path, optional — omit if N/A>",
   "mcpServers": { "<name>": { "command": "...", "args": [], "env": {} } },
   "common":  { "plugins": [], "pluginDirs": [], "mcp": [] },
   "control": { "plugins": [], "pluginDirs": [], "mcp": [] },
@@ -81,6 +87,18 @@ env.json schema (schema 1):
 - `plugins`: marketplace refs for `enabledPlugins` (format `name@marketplace`)
 - `pluginDirs`: local plugin folders, become `--plugin-dir` flags
 - `mcp`: names referencing keys in the `mcpServers` pool
+- `pluginUnderTestRepo`: git repo backing the plugin under test (optional). Not an arm config
+  delta — purely a pointer consumed by `/ab-bench:plan`'s checker-discovery step and
+  `resolve-baseline.mjs` for previous-version baselines. Safe to add/edit after the fact without
+  violating the "never edit env.json between runs" discipline (it doesn't change what either arm loads).
+
+## Previous-version baselines
+
+Once `pluginUnderTestRepo` is set, `/ab-bench:plan` can pin the control arm to a previous released
+version (tag/commit) of the plugin under test instead of vanilla — see
+`skills/plan/scripts/resolve-baseline.mjs` and the "control this run" step in `skills/plan/SKILL.md`.
+This is chosen PER RUN (`runs/run-NNN/baseline.json`), never in env.json — control's identity as
+"vanilla or previous version" is allowed to vary run to run within the same experiment.
 
 ledger.md header:
 
@@ -88,8 +106,8 @@ ledger.md header:
 # <experiment-name> — experiment ledger
 Plugin under test: <ref/path> | Model: <model> | Created: <date>
 
-| run | date | verdict | subjective score | key delta | report |
-|---|---|---|---|---|---|
+| run | control baseline | date | verdict | subjective score | key delta | report |
+|---|---|---|---|---|---|---|
 ```
 
 ## Discipline (tell the user after creating)

@@ -6,9 +6,10 @@ description: >-
   format), reusing the plugin-under-test's own checker scripts where it ships them.
   Auto-trigger when the user says: "plan the next run", "plan run 2", "define the task for
   the ab test", "write the task brief", "set up the next iteration", "prepare the next
-  ab-bench run", "define DoDs for the experiment". Creates runs/run-NNN/task.md and
-  runs/run-NNN/dod-checks.json, writes check files into .dod/checks/. Must run before
-  /ab-bench:fire.
+  ab-bench run", "define DoDs for the experiment", "pin control to a previous version",
+  "test against the last release". Creates runs/run-NNN/task.md, runs/run-NNN/baseline.json
+  (control's vanilla-vs-previous-version choice), and runs/run-NNN/dod-checks.json, writes
+  check files into .dod/checks/. Must run before /ab-bench:fire.
 argument-hint: "[experiment-name]"
 ---
 
@@ -22,7 +23,27 @@ run's report exists, its "Recommendations for next iteration" section should sha
 
 Next number: scan `runs/`, take highest `run-NNN` + 1 (start at `run-001`). Create `runs/run-NNN/`.
 
-## 2. Write task.md — THE PARITY-CRITICAL ARTIFACT
+## 2. Choose control's baseline for this run
+
+Ask: **"control this run: vanilla, or pin to a previous released version of the plugin under test?"**
+Default the suggestion to whatever the LAST run in this experiment used (read the previous
+`runs/run-NNN-1/baseline.json` if one exists) — don't re-ask from scratch every time, just confirm
+"same as last run?" first. This choice is per-run, never written to env.json.
+
+- **Vanilla** (or no prior baseline.json exists and the user doesn't want to pin one):
+  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <envRoot> <runDir> --vanilla`
+- **Previous version**: needs `env.json.pluginUnderTestRepo` — if absent, tell the user to add it (a
+  git repo path) before this is possible, and fall back to vanilla for now. Otherwise ask for the
+  tag/commit to pin, then:
+  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <envRoot> <runDir> --ref <tag-or-commit>`
+  This checks out (or reuses, if already cached) a git worktree at `<envRoot>/baselines/<ref>/` and
+  writes `runs/run-NNN/baseline.json` with the resolved `pluginDirs` for control. It fails loudly on a
+  bad ref or missing repo — fix and re-run rather than proceeding without a baseline.
+
+Either way you now have a real `runs/run-NNN/baseline.json` — `/ab-bench:fire` reads it to compose
+control's config; nothing else in this skill needs to touch it again except step 4b below.
+
+## 3. Write task.md — THE PARITY-CRITICAL ARTIFACT
 
 `task.md` is copied verbatim into both workspaces as `TASK.md` and both arms open with the same
 fixed prompt telling them to execute it. Rules:
@@ -37,7 +58,7 @@ fixed prompt telling them to execute it. Rules:
 
 Draft it, show the user, iterate until approved.
 
-## 3. Define REAL DoD checks — no placeholders
+## 4. Define REAL DoD checks — no placeholders
 
 The DoD checks are the pre-registered success criteria — defined NOW, in the main session, before
 any output exists, so post-hoc rationalization can't creep in. Every check file you write here is
@@ -48,7 +69,7 @@ leave it out and say so.
 Full schema and rationale: `${CLAUDE_SKILL_DIR}/../../docs/dod-contract.md`. Read it if unsure of
 dod-lite's exact file formats before writing anything.
 
-### 3a. Interview for criteria (same rigor as dod-lite's own planning skill)
+### 4a. Interview for criteria (same rigor as dod-lite's own planning skill)
 
 Draft candidate criteria that would actually distinguish "done" from "not done" for THIS task. For
 each, decide the tier:
@@ -61,25 +82,34 @@ Present the list (what + tier, not draft file contents yet) to the user, iterate
 same proposal-then-author order as dod-lite's `planning` skill. Zero checks can be a legitimate
 outcome for a trivial task.
 
-### 3b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
+### 4b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
 
 For each agreed criterion, look at the plugin-under-test's repo (path from env.json
-`plugin_under_test` / test arm's `pluginDirs`) for checker-like tooling it already ships: a
+`pluginUnderTestRepo` / test arm's `pluginDirs`) for checker-like tooling it already ships: a
 `checks/`, `qa/`, `validators/`, or similarly-named folder, or anything its README/SKILL.md
 documents as QA/validation scripts meant to grade its own output (e.g. a Blender plugin shipping
 mesh-validation scripts). If a plugin-native script already covers a criterion:
 - use it INSTEAD of writing a generic one for that criterion.
-- it goes to the **test arm only** (control doesn't have the plugin, so it can't run a checker that
-  depends on the plugin's own tooling) — unless a generic equivalent can meaningfully assess the same
-  criterion without the plugin, in which case give control that generic version instead.
-- this means control and test CAN legitimately end up with different check-id lists. That's expected
-  when driven by a plugin-native checker, not a parity violation — record `source` (see 3d) so
-  `/ab-bench:analyze` explains it instead of flagging it.
+- if control this run is **vanilla**: it goes to the **test arm only** (control has no plugin at all,
+  so it can't run a checker that depends on the plugin's own tooling) — unless a generic equivalent
+  can meaningfully assess the same criterion without the plugin, in which case give control that
+  generic version instead.
+- if control this run is a **previous-version baseline** (`runs/run-NNN/baseline.json` has
+  `control_baseline.type: "previous-version"`): ALSO look inside
+  `control_baseline.worktreePath` for the SAME kind of shipped checker (the old tag may or may not
+  still ship it, or may ship an older/different version of it). If found, control gets its own entry
+  for the SAME check `id`, `source: "plugin-native"`, `origin` pointing INTO the worktree — this is the
+  OLD checker judging the OLD code, compared against test's CURRENT checker judging CURRENT code, which
+  is the accurate apples-to-apples comparison (not today's checker run against yesterday's code). If
+  the old tag doesn't ship an equivalent checker at all, fall back to the vanilla-case rule above.
+- this means control and test CAN legitimately end up with different check-id lists, or the same id
+  with different `origin`. That's expected when driven by a plugin-native checker, not a parity
+  violation — record `source`/`origin` (see 4d) so `/ab-bench:analyze` explains it instead of flagging it.
 
 List `.dod/checks/` first (same as dod-lite's own skill) — reuse an existing id if a prior run
 already covers the same intent, don't duplicate.
 
-### 3c. Author real check files into `<experiment>/.dod/checks/`
+### 4c. Author real check files into `<experiment>/.dod/checks/`
 
 dod-lite's exact format (id = filename without extension, unique within `checks/`):
 - **script**: `<id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb` — actual working exit-code logic (0 = pass). If
@@ -97,7 +127,7 @@ dod-lite's exact format (id = filename without extension, unique within `checks/
   A `prompt` checker runs with only read-only repo access and no conversation context — write the
   question so it states what "done" looks like, not just "did we do the thing."
 
-### 3d. Write `runs/run-NNN/dod-checks.json` — the per-run artifact
+### 4d. Write `runs/run-NNN/dod-checks.json` — the per-run artifact
 
 This lives in the RUN folder, NOT in `.dod/` — which checks apply to this run is task-specific, the
 check FILES in `.dod/checks/` are the experiment-level shared/reused state.
@@ -107,7 +137,7 @@ check FILES in `.dod/checks/` are the experiment-level shared/reused state.
   "schema": 1,
   "run": "run-NNN",
   "checks": {
-    "control": [ { "id": "...", "tier": "script|prompt|human", "source": "generic" } ],
+    "control": [ { "id": "...", "tier": "script|prompt|human", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ],
     "test":    [ { "id": "...", "tier": "script|prompt|human", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ]
   }
 }
@@ -121,8 +151,9 @@ If the user wants to skip DoD tracking for this run entirely: don't write `dod-c
 (ab-bench degrades gracefully — analysis then leans on metrics + human verdict only). Say so plainly
 before moving on.
 
-## 4. Confirm ready
+## 5. Confirm ready
 
 Tell the user: `run-NNN planned. Fire with /ab-bench:fire when ready.`
-Checklist to state: task.md written (plugin-blind ✓), `dod-checks.json` present (with control/test
-counts and any plugin-native checks called out) or explicitly skipped.
+Checklist to state: control baseline this run (vanilla, or previous-version@ref), task.md written
+(plugin-blind ✓), `dod-checks.json` present (with control/test counts and any plugin-native checks
+called out) or explicitly skipped.

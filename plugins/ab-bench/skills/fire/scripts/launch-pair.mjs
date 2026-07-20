@@ -16,7 +16,9 @@
  *      dod-lite resolves .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
  *   4. write <workspace>/.claude/settings.json with the SessionStart linkage hook
  *      (arm-session-start.mjs: manifest linkage + .dod registration)
- *   5. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json
+ *   5. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json — control's
+ *      pluginDirs also get runs/run-NNN/baseline.json's worktree paths layered in, if that run
+ *      pinned control to a previous version instead of vanilla (see /ab-bench:plan step 2)
  *   6. spawn a detached titled terminal running:
  *      claude --model M --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
  *
@@ -75,7 +77,23 @@ function loadEnv(envRoot) {
     env[key].mcp = env[key].mcp || [];
   }
   env.mcpServers = env.mcpServers || {};
+  env.pluginUnderTestRepo = env.pluginUnderTestRepo || null;
   return env;
+}
+
+// runs/run-NNN/baseline.json — written by /ab-bench:plan's resolve-baseline.mjs. Absent (or
+// type "vanilla") means today's behavior: control gets nothing beyond env.json's own control
+// block. type "previous-version" layers a git-worktree checkout's pluginDirs onto control for
+// THIS run only — env.json's control block is never touched (baseline varies per run, env.json
+// is locked for the experiment's whole life).
+function loadBaseline(runDir) {
+  const p = path.join(runDir, 'baseline.json');
+  if (!fs.existsSync(p)) return { control_baseline: { type: 'vanilla' } };
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) {
+    fail(`runs/${path.basename(runDir)}/baseline.json is not valid JSON: ${e.message}`);
+  }
 }
 
 function findRun(envRoot, explicit) {
@@ -111,9 +129,13 @@ function loadGlobalEnabledPlugins() {
   }
 }
 
-function composeArm(env, arm, globalEnabled) {
+function composeArm(env, arm, globalEnabled, baseline) {
   const plugins = [...env.common.plugins, ...env[arm].plugins];
-  const pluginDirs = [...env.common.pluginDirs, ...env[arm].pluginDirs].map((p) => path.resolve(p));
+  const baselineDirs =
+    arm === 'control' && baseline.control_baseline.type === 'previous-version'
+      ? baseline.control_baseline.pluginDirs
+      : [];
+  const pluginDirs = [...env.common.pluginDirs, ...env[arm].pluginDirs, ...baselineDirs].map((p) => path.resolve(p));
   const mcpNames = [...env.common.mcp, ...env[arm].mcp];
   const mcpServers = {};
   for (const name of mcpNames) {
@@ -215,17 +237,22 @@ function main() {
   fs.mkdirSync(dodDir, { recursive: true });
 
   const globalEnabled = loadGlobalEnabledPlugins();
+  const baseline = loadBaseline(runDir);
   const composed = {};
   const parity = { equal: {}, differs: {} };
-  for (const arm of ARMS) composed[arm] = composeArm(env, arm, globalEnabled);
+  for (const arm of ARMS) composed[arm] = composeArm(env, arm, globalEnabled, baseline);
 
   parity.equal.model = env.model;
   parity.equal.prompt = OPENING_PROMPT;
   parity.equal.common_plugins = env.common.plugins;
   parity.equal.common_pluginDirs = env.common.pluginDirs;
   parity.equal.common_mcp = env.common.mcp;
-  parity.differs.control = { plugins: env.control.plugins, pluginDirs: env.control.pluginDirs, mcp: env.control.mcp };
-  parity.differs.test = { plugins: env.test.plugins, pluginDirs: env.test.pluginDirs, mcp: env.test.mcp };
+  // pluginDirs here is the RESOLVED list (env.json + baseline.json layered in for control),
+  // not just env.json's raw control block — so a previous-version baseline's worktree paths
+  // actually show up in the parity report.
+  parity.differs.control = { plugins: env.control.plugins, pluginDirs: composed.control.pluginDirs, mcp: env.control.mcp };
+  parity.differs.test = { plugins: env.test.plugins, pluginDirs: composed.test.pluginDirs, mcp: env.test.mcp };
+  parity.control_baseline = baseline.control_baseline;
 
   const dodChecksPath = path.join(runDir, 'dod-checks.json');
   if (fs.existsSync(dodChecksPath)) {
@@ -267,6 +294,13 @@ function main() {
     const batch = [
       '@echo off',
       'chcp 65001 >nul',
+      // this whole launcher runs via the Bash tool inside a Claude Code session, so
+      // CLAUDE_CODE_CHILD_SESSION/CLAUDECODE leak down through cmd.exe -> start -> cmd /k
+      // into each arm's claude.exe, which misclassifies it as nested and silently drops
+      // transcript persistence (hooks/cost tracking still work — separate subsystem).
+      // Confirmed via code.claude.com/docs/en/env-vars (CLAUDE_CODE_FORCE_SESSION_PERSISTENCE),
+      // this is the documented override for exactly this "background launcher" case.
+      'set CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1',
       `cd /d "${workspace}"`,
       claudeCmd,
       '',
@@ -290,6 +324,12 @@ function main() {
       spawn_pid: null,
       sessions: [],
     };
+    if (arm === 'control') {
+      manifest.arms.control.baseline =
+        baseline.control_baseline.type === 'previous-version'
+          ? { type: 'previous-version', ref: baseline.control_baseline.ref }
+          : { type: 'vanilla' };
+    }
   }
 
   if (dryRun) {

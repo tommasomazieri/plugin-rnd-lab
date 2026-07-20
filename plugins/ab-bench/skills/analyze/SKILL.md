@@ -63,8 +63,10 @@ mark the rest as TODO items targeting the plugin-under-test repo>
 
 ## 5. Append the ledger row
 
-Add to `<experiment>/ledger.md`: run, date, one-word verdict (test-won / control-won / wash /
-contaminated), subjective score, single most important delta, relative path to report.md.
+Add to `<experiment>/ledger.md`: run, control baseline (`vanilla` or `previous-version@<ref>` — read
+`manifest.json`'s `arms.control.baseline`, don't re-derive it), date, one-word verdict (test-won /
+control-won / wash / contaminated), subjective score, single most important delta, relative path to
+report.md.
 
 ## 6. Close the loop
 

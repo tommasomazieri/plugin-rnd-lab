@@ -121,6 +121,7 @@ export function compareRun(runDir) {
     schema: 1,
     experiment: manifest.experiment,
     run: manifest.run,
+    control_baseline: manifest.arms?.control?.baseline || { type: 'vanilla' },
     generated_at: new Date().toISOString(),
     totals: {
       control: summarize(c),
