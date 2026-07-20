@@ -1,7 +1,9 @@
 # plugin-rnd-lab
 
 A Claude Code **marketplace** for plugin R&D tooling — instruments for testing, measuring, and
-iterating on other Claude Code plugins. Currently ships one plugin: **ab-bench**.
+iterating on other Claude Code plugins. Ships two plugins: **ab-bench** (the A/B harness) and
+**dod-lite** (its recommended Definition-of-Done tracker, bundled here so ab-bench always has a
+working companion available — see "Recommended companion" below).
 
 ## What's ab-bench, in one paragraph
 
@@ -19,28 +21,33 @@ earned its keep, and what to fix before the next iteration.
 - **Windows** right now — the launcher spawns detached `cmd.exe` terminals and links each arm
   workspace's `.dod/` via a Windows directory junction. Not yet ported to macOS/Linux.
 - Node.js (bundled scripts are plain `.mjs`, no dependencies to install).
-- Recommended: [**dod-lite**](#recommended-companion-dod-lite) — a separate, lightweight
-  Definition-of-Done tracking plugin. ab-bench works without it (metrics + your verdict only) but
-  is much stronger with it — see below.
+- Recommended: [**dod-lite**](#recommended-companion-dod-lite), bundled in this same marketplace.
+  ab-bench works without it (metrics + your verdict only) but is much stronger with it — see below.
 
 ## Install
 
 ```
 claude plugin marketplace add <path-to-this-repo>
 claude plugin install ab-bench@plugin-rnd-lab
+claude plugin install dod-lite@plugin-rnd-lab
 ```
 
 This repo is typically used as a **local** marketplace source (clone it, point `marketplace add`
-at the local path). Whenever you pull changes to this repo, refresh the plugin's cached copy:
+at the local path). Whenever you pull changes to this repo, refresh each plugin's cached copy:
 
 ```
 claude plugin marketplace update plugin-rnd-lab
 claude plugin update ab-bench@plugin-rnd-lab
+claude plugin update dod-lite@plugin-rnd-lab
 ```
 
-`plugin update` only refreshes if `plugins/ab-bench/.claude-plugin/plugin.json`'s `version` field
-changed — bump it after editing the plugin, or the update is a silent no-op. Restart Claude Code
-sessions afterward to pick up the change.
+`plugin update` only refreshes if that plugin's `.claude-plugin/plugin.json` `version` field
+changed — bump it after editing, or the update is a silent no-op. Restart Claude Code sessions
+afterward to pick up the change.
+
+**Don't run a standalone dod-lite install and this bundled one at the same time in the same
+Claude Code setup** — two active copies of the same hooks (SessionStart/UserPromptSubmit/
+PreToolUse/Stop) will double-fire. Pick one.
 
 ## Configure: where experiments live
 
@@ -58,13 +65,14 @@ ab-bench integrates with **dod-lite**, a lightweight per-session Definition-of-D
 REAL pass/fail criteria for a run before either arm starts, instead of relying only on token/turn
 metrics and your own eyeballing.
 
-`dod-lite` isn't published yet — it'll be linked here once it's on GitHub. Until then, install it
-from its local path the same way:
+`dod-lite` ships in this same marketplace (`plugins/dod-lite/`) — `claude plugin install
+dod-lite@plugin-rnd-lab` installs it, no separate repo needed. It also works standalone, outside
+ab-bench, in any project.
 
-```
-claude plugin marketplace add <path-to-dod-lite-repo>
-claude plugin install dod-lite@<its-marketplace-name>
-```
+ab-bench degrades gracefully without it: if you never declare `dod-lite` in an experiment's
+`env.json` `common`/`control`/`test` plugin lists, `/ab-bench:plan` skips DoD-check authoring and
+says so plainly — analysis then leans on metrics + your verdict only. It does NOT silently author
+checks that nothing will ever evaluate.
 
 Full integration contract (what ab-bench expects from dod-lite, verified against its real source):
 `plugins/ab-bench/docs/dod-contract.md`.
@@ -100,9 +108,11 @@ spawns).
 ## Repo layout
 
 ```
-.claude-plugin/marketplace.json   marketplace manifest (this repo, one entry: ab-bench)
-plugins/ab-bench/                 the plugin — skills, agents, hooks, docs
+.claude-plugin/marketplace.json   marketplace manifest — two entries: ab-bench, dod-lite
+plugins/ab-bench/                 the A/B harness — skills, agents, hooks, docs
   README.md                       architecture / internals reference (schemas, contracts, scripts)
+plugins/dod-lite/                 the DoD tracker — hooks, planning skill, status command
+  README.md                       how dod-lite works standalone (outside ab-bench too)
 ```
 
 For how ab-bench actually works under the hood — experiment folder layout, the DoD junction trick,

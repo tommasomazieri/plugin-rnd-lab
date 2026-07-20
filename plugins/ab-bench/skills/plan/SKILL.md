@@ -71,6 +71,29 @@ leave it out and say so.
 Full schema and rationale: `${CLAUDE_SKILL_DIR}/../../docs/dod-contract.md`. Read it if unsure of
 dod-lite's exact file formats before writing anything.
 
+### 4.0 Preflight — is dod-lite actually going to run for this experiment?
+
+Check `env.json`'s `common`/`control`/`test` blocks (`plugins` + `pluginDirs` arrays) for an entry
+that resolves to the `dod-lite` plugin, for whichever arm(s) you're about to write checks for. If
+it's missing from an arm's config:
+
+**STOP — do not run the interview below.** Writing check files nobody will ever evaluate is worse
+than writing none: dod-lite's hooks won't be loaded in that arm, so every check sits at `pending`
+forever and `/ab-bench:analyze` will misreport it as "nothing passed" instead of "tracking was
+never active." Tell the user plainly: dod-lite isn't declared for this arm, DoD checks would be
+inert, and offer the legitimate options —
+- **No run has fired yet for this experiment** (this would be run-001): adding `dod-lite` to
+  `env.json` now is fine, nothing to break comparability with yet — add it, then continue with 4a.
+- **A prior run already fired** (run-002+): adding `dod-lite` to `env.json` now IS a mid-experiment
+  edit and breaks run-over-run comparability — the existing "never edit env.json mid-experiment"
+  lock applies here same as anywhere else, this is an actual arm config delta, not metadata like
+  `pluginUnderTestRepo`. Don't do it. Offer instead: skip DoD entirely for this run (don't write
+  `dod-checks.json` — see the graceful-degradation note at the end of this section), or start a
+  NEW experiment version with dod-lite declared from the start (`/ab-bench:init` again, bumped
+  version suffix, per the existing discipline).
+
+Do not silently proceed with authoring checks in any case.
+
 ### 4a. Interview for criteria (same rigor as dod-lite's own planning skill)
 
 Draft candidate criteria that would actually distinguish "done" from "not done" for THIS task. For

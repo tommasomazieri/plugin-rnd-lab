@@ -11,6 +11,11 @@
       "name": "ab-bench",
       "source": "./plugins/ab-bench",
       "description": "Control-vs-plugin A/B testing harness: creates experiment environments, fires paired sessions with everything-else-equal configs, analyzes both session JSONLs + DoD logs + human verdict into an evidence-backed improvement report."
+    },
+    {
+      "name": "dod-lite",
+      "source": "./plugins/dod-lite",
+      "description": "Lightweight per-session Definition-of-Done tracking: script/AI-graded/human-judged checks defined in a project's .dod/ folder, designed via a plan-mode-gated interview skill, enforced at session Stop. ab-bench's recommended companion for real pass/fail tracking."
     }
   ]
 }
