@@ -84,6 +84,10 @@ Experiments live OUTSIDE this repo, under your configured `experiments_root\<exp
 runs from your **main** Claude Code session (a third session, separate from the two arms it
 spawns).
 
+New here? **`/ab-bench:learn`** walks through this whole lifecycle in plain language — setup,
+planning, firing the paired sessions, working them in parallel, analyzing, and how dod-lite fits
+in. Ask it about one stage specifically too, e.g. `/ab-bench:learn fire`.
+
 0. **`/ab-bench:setup`** — first time only (or to change the folder later): pick/create the
    experiments root. Skip if Claude Code already prompted you for it on install.
 1. **`/ab-bench:init my-plugin-v1`** — interviews you (plugin under test, control compensation,

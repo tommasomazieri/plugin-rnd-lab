@@ -2,7 +2,7 @@
   "name": "ab-bench",
   "displayName": "ab-bench",
   "description": "A/B testing harness for Claude Code plugins. Creates experiment environments, launches paired control/test sessions with everything-else-equal configs, and produces comparative analysis reports (deterministic metrics + LLM contextualization) to drive plugin iteration.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": {
     "name": "Tommaso Mazieri"
   },
