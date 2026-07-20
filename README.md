@@ -42,6 +42,15 @@ claude plugin update ab-bench@plugin-rnd-lab
 changed — bump it after editing the plugin, or the update is a silent no-op. Restart Claude Code
 sessions afterward to pick up the change.
 
+## Configure: where experiments live
+
+ab-bench keeps every experiment it creates in one folder outside any project repo, reused across
+every experiment (`env.json`, seed files, run history, transcripts). That folder is a plugin
+[user configuration](https://code.claude.com/docs/en/plugins-reference#user-configuration) value
+(`experiments_root`) — Claude Code prompts for it the first time you enable the plugin. If you
+skipped that prompt, or want to change the folder later, run `/ab-bench:setup` (user-invoked
+only) any time.
+
 ## Recommended companion: dod-lite
 
 ab-bench integrates with **dod-lite**, a lightweight per-session Definition-of-Done tracker (script
@@ -62,10 +71,13 @@ Full integration contract (what ab-bench expects from dod-lite, verified against
 
 ## Quickstart
 
-Experiments live OUTSIDE this repo, under `PROGETTI\test-environments\<experiment-name>\` — this
-keeps the plugin repo clean of test artifacts. Everything below runs from your **main** Claude Code
-session (a third session, separate from the two arms it spawns).
+Experiments live OUTSIDE this repo, under your configured `experiments_root\<experiment-name>\`
+(see "Configure" above) — this keeps the plugin repo clean of test artifacts. Everything below
+runs from your **main** Claude Code session (a third session, separate from the two arms it
+spawns).
 
+0. **`/ab-bench:setup`** — first time only (or to change the folder later): pick/create the
+   experiments root. Skip if Claude Code already prompted you for it on install.
 1. **`/ab-bench:init my-plugin-v1`** — interviews you (plugin under test, control compensation,
    shared plugins/MCPs, model, seed files), creates the experiment folder.
 2. **`/ab-bench:plan`** — writes `task.md` (the plugin-blind assignment both arms get) and designs

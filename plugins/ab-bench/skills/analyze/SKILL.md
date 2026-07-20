@@ -12,8 +12,9 @@ argument-hint: "[experiment-name] [verdict statement]"
 
 # ab-bench: analyze run
 
-Experiments live in `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\`. Identify
-experiment + run (default: latest fired run with linked arms and no `analysis/report.md`).
+Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
+reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
+Identify experiment + run (default: latest fired run with linked arms and no `analysis/report.md`).
 
 ## 1. Capture the human verdict
 

@@ -4,13 +4,14 @@ description: >-
   planned/fired/linked/analyzed, session ids per arm, parity flags. Auto-trigger when the
   user says: "ab status", "experiment status", "how are my ab tests doing", "which runs are
   pending", "show the experiment state", "is the run linked", "list experiments". Read-only:
-  reads env.json, manifests, ledger.md under PROGETTI\test-environments\.
+  reads env.json, manifests, ledger.md under the configured experiments root.
 argument-hint: "[experiment-name]"
 ---
 
 # ab-bench: status
 
-Root: `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\`.
+Root: `${user_config.experiments_root}`. If that's empty or still literally reads
+`${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
 
 If $ARGUMENTS names an experiment, report that one in detail; otherwise list all experiments
 (one line each: name, model, plugin under test, #runs, last run state) and detail the most

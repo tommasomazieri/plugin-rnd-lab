@@ -15,9 +15,11 @@ argument-hint: "[experiment-name]"
 
 # ab-bench: plan next run
 
-Experiments live in `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\`. Identify the
-experiment from $ARGUMENTS or ask. Read its `env.json` and `ledger.md` for context — if a prior
-run's report exists, its "Recommendations for next iteration" section should shape this run.
+Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
+reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
+Identify the experiment from $ARGUMENTS or ask. Read its `env.json` and `ledger.md` for context —
+if a prior run's report exists, its "Recommendations for next iteration" section should shape
+this run.
 
 ## 1. Create the run folder
 

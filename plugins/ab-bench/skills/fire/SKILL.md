@@ -12,8 +12,9 @@ allowed-tools: Bash(node *) Read
 
 # ab-bench: fire the run pair
 
-Experiments live in `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\`. Identify the
-experiment from $ARGUMENTS or ask.
+Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
+reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
+Identify the experiment from $ARGUMENTS or ask.
 
 ## 1. Preflight — dry run first
 

@@ -1,7 +1,7 @@
 {
   "name": "plugin-rnd-lab",
   "owner": {
-    "name": "tomin"
+    "name": "Tommaso Mazieri"
   },
   "metadata": {
     "description": "Lab marketplace for plugin R&D tooling — instruments for testing, measuring, and iterating Claude Code plugins."

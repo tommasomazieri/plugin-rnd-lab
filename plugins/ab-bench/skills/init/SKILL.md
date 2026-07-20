@@ -6,14 +6,18 @@ description: >-
   when the user says: "new experiment", "init an ab test", "set up an A/B test for <plugin>",
   "create a test environment", "benchmark this plugin", "test <plugin> against control",
   "start an ab-bench experiment", "I want to A/B test my plugin". Creates the experiment
-  folder in PROGETTI\test-environments\ (env.json contract, seed/, .dod/, ledger.md, runs/).
-  Does NOT fire sessions — that is /ab-bench:fire after /ab-bench:plan.
+  folder under the configured experiments root (env.json contract, seed/, .dod/, ledger.md,
+  runs/). Does NOT fire sessions — that is /ab-bench:fire after /ab-bench:plan.
 argument-hint: "[experiment-name]"
 ---
 
 # ab-bench: init experiment
 
-Create an experiment environment under `C:\Users\tomin\OneDrive\Desktop\PROGETTI\test-environments\<experiment-name>\`.
+Experiments root: `${user_config.experiments_root}`. If that's empty or still literally reads
+`${user_config.experiments_root}`, the plugin hasn't been configured yet — tell the user to run
+`/ab-bench:setup` first and stop. Do not guess a path or create one yourself.
+
+Create an experiment environment under `${user_config.experiments_root}\<experiment-name>\`.
 
 ## 0. Preflight — idempotent check (ALWAYS do this first, before any Write/mkdir)
 

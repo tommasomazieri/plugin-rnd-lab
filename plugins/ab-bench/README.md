@@ -9,6 +9,7 @@ drives the plugin's next iteration.
 ## Lifecycle
 
 ```
+/ab-bench:setup    configure experiments_root (once, or to change it later)         ← one-time
 /ab-bench:init     create experiment env (env.json contract, seed/, .dod/, ledger.md)
 /ab-bench:plan     write plugin-blind task.md + pre-register DoD checks   ← per run
 /ab-bench:fire     launch both arms in detached terminals                 ← per run
@@ -19,7 +20,7 @@ drives the plugin's next iteration.
 /ab-bench:status   state of all experiments/runs at any time
 ```
 
-## Experiment layout (`PROGETTI\test-environments\<experiment>\`)
+## Experiment layout (`<experiments_root>\<experiment>\`, see `/ab-bench:setup`)
 
 ```
 env.json            experiment contract: model + common/control/test config deltas (locked for the

@@ -1,7 +1,7 @@
 # .dod/ Integration Contract — ab-bench ⇄ dod-lite
 
-Status: **verified against dod-lite's actual source** (`PROGETTI\ai-infrastructure-projects\DoD-lightweight`,
-read 2026-07-11 — it is a real, working plugin, not a skeleton). This doc reflects dod-lite's REAL
+Status: **verified against dod-lite's actual source** (read 2026-07-11 — it is a real, working
+plugin, not a skeleton). This doc reflects dod-lite's REAL
 file schema and hook behavior, not an invented format. If dod-lite's internals change, re-read its
 `hooks/lib.mjs` + `hooks/*.mjs` + `skills/planning/SKILL.md` and update this doc before touching
 either plugin's code again.
