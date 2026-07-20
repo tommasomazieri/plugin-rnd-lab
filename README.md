@@ -77,6 +77,20 @@ checks that nothing will ever evaluate.
 Full integration contract (what ab-bench expects from dod-lite, verified against its real source):
 `plugins/ab-bench/docs/dod-contract.md`.
 
+## Optional: faster analysis with context-mode
+
+`/ab-bench:analyze`'s comparator agent filters two full session transcripts down to the relevant
+excerpts. It always works with built-in Grep/Read alone — nothing extra required. If you also
+have the third-party [**context-mode**](https://github.com/mksglu/context-mode) MCP plugin (by
+Mert Koseoğlu, not affiliated with or bundled in this marketplace) installed and enabled, the
+agent uses its sandboxed filtering tools opportunistically for the same job, faster. Purely
+optional:
+
+```
+claude plugin marketplace add mksglu/context-mode
+claude plugin install context-mode@context-mode
+```
+
 ## Quickstart
 
 Experiments live OUTSIDE this repo, under your configured `experiments_root\<experiment-name>\`

@@ -16,7 +16,12 @@ raw numbers; you explain them.
    `dod_tracking` (per-arm check pass/fail/pending counts + a note on whether control/test check
    LISTS differ). Ground truth.
 2. `analysis/metrics-control.json`, `analysis/metrics-test.json` — per-arm detail (tool call breakdowns, user-turn previews, compaction events).
-3. Both arm transcripts (`.jsonl`) — large files. NEVER read a transcript whole into context: use context-mode tools (`ctx_execute_file`, `ctx_batch_execute`) to filter/extract, or Grep with targeted patterns, or Read with offset/limit around specific timestamps.
+3. Both arm transcripts (`.jsonl`) — large files. NEVER read a transcript whole into context.
+   Preferred: Grep with targeted patterns, or Read with offset/limit around specific timestamps
+   — both always available, no extra install. If the optional third-party `context-mode` MCP
+   plugin (`mksglu/context-mode`, NOT bundled with ab-bench) happens to be installed in this
+   session, its `ctx_execute_file`/`ctx_batch_execute` tools are a faster alternative for the
+   same filtering — use them opportunistically if present, never assume they exist.
 4. `.dod/sessions/<session-id>.json` for each arm, if present (path from `comparison.json.dod_tracking`) — turn-per-turn check `history`, per-check `state`.
 5. `runs/run-NNN/dod-checks.json`, if present — records WHY control/test check lists might differ:
    a check tagged `source: "plugin-native"` means it only applies to the arm that had the plugin.

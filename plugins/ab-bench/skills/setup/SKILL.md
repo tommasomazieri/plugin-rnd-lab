@@ -77,3 +77,8 @@ Tell the user: experiments root saved to `<resolved-path>`. If this session alre
 `${user_config.experiments_root}` as empty earlier in this same conversation, a session restart
 (or `/reload-plugins`) may be needed before other ab-bench skills pick up the new value — mention
 it, don't assume. Next step: `/ab-bench:init <experiment-name>`.
+
+Mention once, briefly, as optional (not required — don't dwell on it): the third-party
+`context-mode` MCP plugin (`mksglu/context-mode`) speeds up `/ab-bench:analyze`'s transcript
+filtering if installed, but ab-bench works fully without it. See README "Optional: faster
+analysis with context-mode" or `/ab-bench:learn analyze` for details.

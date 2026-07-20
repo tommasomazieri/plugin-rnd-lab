@@ -164,6 +164,13 @@ Run from the main session once both arms are done. Fuses three layers:
    data) vs `[SUBJECTIVE]` (your stated verdict/interpretation) — kept
    separate on purpose, never blended into one unlabeled score.
 
+This agent filters two full transcripts down to relevant excerpts using Grep/
+Read — always works, nothing extra needed. If the optional third-party
+`context-mode` MCP plugin (`mksglu/context-mode`, not affiliated with or
+bundled in this marketplace) happens to be installed, it uses that instead
+where available, purely for speed. Not required; see "Optional dependency"
+below if the user wants it.
+
 Output: `runs/run-NNN/analysis/report.md` (verdict, metrics table, tagged
 analysis, next-iteration recommendations) plus a new row in the
 experiment's `ledger.md`. Recommendations get applied to the plugin under
@@ -199,6 +206,22 @@ a new experiment version with it declared from the start.
 
 Full technical contract (exact files/schema dod-lite expects, verified
 against its real source): `plugins/ab-bench/docs/dod-contract.md`.
+
+## Optional dependency: context-mode
+
+ab-bench and dod-lite together need nothing beyond Node builtins and Claude
+Code itself — no npm packages, no other plugins required. The one optional
+exception: `/ab-bench:analyze`'s comparator agent can use the third-party
+`context-mode` MCP plugin (`mksglu/context-mode`, unaffiliated, not bundled
+here) to filter large session transcripts faster than plain Grep/Read. It
+degrades gracefully if absent — analysis is not blocked or degraded in
+quality, just potentially a bit slower on very long sessions. Install only
+if wanted:
+
+```
+claude plugin marketplace add mksglu/context-mode
+claude plugin install context-mode@context-mode
+```
 
 ## Discipline — the rules that keep runs comparable
 
