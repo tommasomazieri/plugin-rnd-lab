@@ -181,6 +181,18 @@ function writeWorkspaceSettings(workspace, manifestPath, arm, dodDir) {
         },
       ],
     },
+    // Structural, not advisory: an arm must never be able to edit the shared DoD
+    // checkers it's graded against, no matter what it decides mid-run (confirmed
+    // real incident: blender-plugin-tester run-003, test arm edited
+    // .dod/checks/_lib/scene_state_checks.py three times after getting stuck on a
+    // failing check, reverting only after two live human interventions). `/.dod/**`
+    // is project-settings-relative (this file lives at <workspace>/.claude/settings.json),
+    // so it resolves to <workspace>/.dod/** on both arms regardless of experiment.
+    // Also feeds sandbox.filesystem.denyWrite automatically (Claude Code merges
+    // Edit(...)/Write(...) deny rules into it), closing the Bash-write-around-the-tool gap too.
+    permissions: {
+      deny: ['Edit(/.dod/**)', 'Write(/.dod/**)', 'MultiEdit(/.dod/**)'],
+    },
   };
   const dir = path.join(workspace, '.claude');
   fs.mkdirSync(dir, { recursive: true });
