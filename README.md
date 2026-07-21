@@ -5,6 +5,10 @@ iterating on other Claude Code plugins. Ships two plugins: **ab-bench** (the A/B
 **dod-lite** (its recommended Definition-of-Done tracker, bundled here so ab-bench always has a
 working companion available — see "Recommended companion" below).
 
+**Who this is for:** you're building (or evaluating) a Claude Code plugin and want proof it
+actually helps — not just a feeling. Not a general-purpose plugin, not a 2-minute install: it's a
+real testing harness with a learning curve. Windows only for now (see Prerequisites for why).
+
 ## What's ab-bench, in one paragraph
 
 You built a Claude Code plugin. Does it actually make sessions better, or does it just feel that
@@ -18,8 +22,13 @@ earned its keep, and what to fix before the next iteration.
 ## Prerequisites
 
 - [Claude Code](https://code.claude.com) CLI installed and on `PATH` as `claude`.
-- **Windows** right now — the launcher spawns detached `cmd.exe` terminals and links each arm
-  workspace's `.dod/` via a Windows directory junction. Not yet ported to macOS/Linux.
+- **Windows** right now. Two arm-specific reasons: `/ab-bench:fire` opens each arm in its own
+  visible, titled terminal window via `cmd.exe`/`start` — there's no cross-platform way to do
+  that, macOS needs `osascript`/Terminal.app and Linux needs a specific terminal emulator, so
+  porting means a second launch path, not a one-line swap. Separately, each arm's `.dod/` links to
+  the shared experiment `.dod/` via a Windows directory junction (chosen because it needs no admin
+  rights, unlike a Windows symlink) — trivial to swap for a plain POSIX symlink, that part isn't
+  the blocker. Not yet ported to macOS/Linux.
 - Node.js (bundled scripts are plain `.mjs`, no dependencies to install).
 - Recommended: [**dod-lite**](#recommended-companion-dod-lite), bundled in this same marketplace.
   ab-bench works without it (metrics + your verdict only) but is much stronger with it — see below.
