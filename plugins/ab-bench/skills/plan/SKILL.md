@@ -21,6 +21,12 @@ Identify the experiment from $ARGUMENTS or ask. Read its `env.json` and `ledger.
 if a prior run's report exists, its "Recommendations for next iteration" section should shape
 this run.
 
+**Preflight — `mandate.md` must exist.** Read `<experiment>/mandate.md`. If it's missing (a
+legacy experiment created before `/ab-bench:understand` existed), STOP: tell the user to run
+`/ab-bench:understand <experiment-name>` first, and do not draft task.md or DoD checks without
+it — designing tasks with no anchor to what the plugin is actually FOR is the exact failure mode
+this file exists to prevent.
+
 ## 1. Create the run folder
 
 Next number: scan `runs/`, take highest `run-NNN` + 1 (start at `run-001`). Create `runs/run-NNN/`.
@@ -57,6 +63,11 @@ fixed prompt telling them to execute it. Rules:
 - Concrete deliverables: name the output files/artifacts expected in the workspace.
 - Same task complexity as prior runs if iterating (comparable ledger rows); note in the ledger if
   task difficulty changed.
+- **Justified against `mandate.md`**: before drafting, identify which of mandate.md's sections
+  (capability gap / good-outcome definition / appropriate complexity) this task is meant to
+  exercise. State that justification when you show the draft to the user — if you can't point at
+  a mandate.md section the task exercises, the task is probably testing something irrelevant to
+  the plugin under test; narrow it until it does.
 
 Draft it, show the user, iterate until approved.
 
@@ -103,9 +114,15 @@ each, decide the tier:
 - **prompt** — needs judgement but a read-only AI grader could resolve it by investigating.
 - **human** — genuinely needs this user's judgement (taste, "does this match the ask"). Use sparingly.
 
-Present the list (what + tier, not draft file contents yet) to the user, iterate until agreed —
-same proposal-then-author order as dod-lite's `planning` skill. Zero checks can be a legitimate
-outcome for a trivial task.
+For each candidate criterion, also state which `mandate.md` section it maps to (capability gap,
+good-outcome definition, or known weak spot) — this is a hard requirement, not a nice-to-have. If
+a criterion doesn't map to anything in mandate.md, flag it explicitly to the user before adding
+it: either it's testing territory outside the plugin's stated purpose (drop it), or mandate.md is
+incomplete and should be refreshed via `/ab-bench:understand` (do that first, then resume here).
+
+Present the list (what + tier + mandate.md mapping, not draft file contents yet) to the user,
+iterate until agreed — same proposal-then-author order as dod-lite's `planning` skill. Zero
+checks can be a legitimate outcome for a trivial task.
 
 ### 4b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
 

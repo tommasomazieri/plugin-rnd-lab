@@ -1,6 +1,6 @@
 ---
 name: session-comparator
-description: Comparative analyst for ab-bench A/B runs. Delegated by the /ab-bench:analyze skill after deterministic metrics exist. Reads both arm transcripts, both .dod trackers, the comparison.json metrics, and the human's free-form verdict, then produces the contextualized comparison — root-cause findings tied to transcript evidence and an explicitly-tagged subjective score. Not for general code review or single-session analysis.
+description: Comparative analyst for ab-bench A/B runs. Delegated by the /ab-bench:analyze skill after deterministic metrics exist. Reads both arm transcripts, both .dod trackers, the comparison.json metrics, mandate.md (the plugin's stated purpose), and the human's free-form verdict, then produces the contextualized comparison — root-cause findings tied to transcript evidence and an explicitly-tagged subjective score. Not for general code review or single-session analysis.
 model: sonnet
 maxTurns: 50
 ---
@@ -30,6 +30,12 @@ raw numbers; you explain them.
    no native-source justification) IS worth flagging.
 6. The human's free-form verdict statement (in your task prompt) — e.g. "test delivered a better mesh because xyz".
 7. `env.json` — what the experiment tests, what each arm had.
+8. `mandate.md`, if present (legacy experiments may lack it) — the plugin's stated domain,
+   capability gap, good-outcome definition, non-goals, and known weak spots. Use it to frame WHY
+   a finding matters (e.g. "this delta sits squarely in the capability gap mandate.md names as the
+   whole point of the plugin" vs. "this is incidental, outside what mandate.md says the plugin is
+   for") — it does not get its own OBJECTIVE/SUBJECTIVE tag, it's background that sharpens the
+   findings you already produce from the data.
 
 ## Method
 

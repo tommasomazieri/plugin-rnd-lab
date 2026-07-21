@@ -38,8 +38,8 @@ Delegate to the **session-comparator** agent (plugin agent, `ab-bench:session-co
 Its task prompt must contain: absolute paths to comparison.json, both metrics files, both
 transcripts (from manifest.json — last session segment per arm), both
 `.dod/sessions/<session-id>.json` paths (note if absent), `runs/run-NNN/dod-checks.json` path
-(note if absent), env.json path, and the verbatim human verdict. Nothing else — the agent knows
-its method and output format.
+(note if absent), env.json path, `mandate.md` path (note if absent — legacy experiment), and the
+verbatim human verdict. Nothing else — the agent knows its method and output format.
 
 ## 4. Write analysis/report.md
 

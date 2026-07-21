@@ -6,7 +6,7 @@ description: >-
   reference skill, not a workflow step; never auto-trigger this for someone
   who's just trying to run an experiment. Optional topic argument narrows to
   one stage instead of the full tour.
-argument-hint: "[topic: setup|init|plan|fire|parallel|analyze|status|dod-lite|discipline]"
+argument-hint: "[topic: setup|init|understand|plan|fire|parallel|analyze|status|dod-lite|discipline]"
 disable-model-invocation: true
 ---
 
@@ -19,13 +19,13 @@ then explain it to the user in your own words, adapted to what they asked.
 ## How to run this
 
 - **No $ARGUMENTS**: give the one-paragraph mental model first (below), then
-  walk the full lifecycle stage by stage, in order (setup → init → plan →
-  fire → parallel → analyze → status → dod-lite → discipline). Pause after
-  each stage and ask if they want to go deeper or move to the next one —
-  don't dump the whole thing as one wall of text.
-- **$ARGUMENTS names one topic** (setup/init/plan/fire/parallel/analyze/
-  status/dod-lite/discipline): give the one-paragraph mental model in one
-  line for orientation, then go deep on just that section.
+  walk the full lifecycle stage by stage, in order (setup → init →
+  understand → plan → fire → parallel → analyze → status → dod-lite →
+  discipline). Pause after each stage and ask if they want to go deeper or
+  move to the next one — don't dump the whole thing as one wall of text.
+- **$ARGUMENTS names one topic** (setup/init/understand/plan/fire/parallel/
+  analyze/status/dod-lite/discipline): give the one-paragraph mental model
+  in one line for orientation, then go deep on just that section.
 - **$ARGUMENTS is a free-form question** ("how do I compare against an old
   version", "what happens if I close a terminal"): answer it directly using
   the material below; pull in whichever sections are relevant.
@@ -81,6 +81,25 @@ edited once a run has fired against it.** New config = new experiment
 (bump the version suffix in the name), never a silent edit — otherwise
 later runs stop being comparable to earlier ones.
 
+## Stage: understand (`/ab-bench:understand`)
+
+Closes a gap the rest of the lifecycle used to have: init captured WHICH plugin is under test,
+but never WHAT it's actually for — so plan had no anchor beyond in-the-moment judgement when
+drafting task.md or picking DoD checks. `/ab-bench:init` now MANDATORILY invokes this right
+after scaffolding a fresh experiment (reusing context init already collected — plugin path,
+control compensation, repo path — never re-asking). It's a grill-me-style interview across seven
+categories: domain/environment, the capability gap the plugin fills, the target user's
+before/after workflow, a concrete definition of a good outcome, explicit non-goals, the
+appropriate task-complexity ceiling, and known weak spots worth stress-testing. Output:
+`<experiment>/mandate.md` — read-only background for main-session skills, never cloned into
+either arm's workspace (would break task.md's plugin-blind requirement).
+
+Unlike `env.json`, mandate.md is safe to edit anytime — it's metadata about purpose, not an arm
+config delta. Re-invoke it standalone (`/ab-bench:understand <experiment-name>`) whenever the
+plugin's scope evolves, no version bump needed; it does a full re-interview, never a partial
+patch. `/ab-bench:plan` refuses to draft a task or DoD checks if mandate.md is missing (a legacy
+experiment predating this feature) — it'll tell you to run this first.
+
 ## Stage: plan (`/ab-bench:plan`)
 
 Two things happen here, in the main session, BEFORE either arm ever starts:
@@ -89,7 +108,11 @@ Two things happen here, in the main session, BEFORE either arm ever starts:
    verbatim into both workspaces. It must be plugin-blind: it describes the
    job (what to build, acceptance criteria, constraints) the way a real user
    would state it, with zero mention of the plugin under test or its tools.
-   One leak = contaminated run. Drafted with you, iterated until approved.
+   One leak = contaminated run. Must also be justified against `mandate.md`
+   — which capability gap or good-outcome definition is this task meant to
+   exercise? If it can't point at one, the task is probably testing
+   something irrelevant to the plugin. Drafted with you, iterated until
+   approved.
 2. **Real Definition-of-Done checks** — pre-registered pass/fail criteria,
    defined now so post-hoc rationalization can't creep in later. This is
    where dod-lite comes in (see that section) — checks get tiered as
@@ -99,11 +122,15 @@ Two things happen here, in the main session, BEFORE either arm ever starts:
    plugin under test ships its own checker scripts (a `checks/`/`qa/`
    folder, etc.), plan reuses those instead of writing generic ones — this
    can legitimately give control and test different check lists; that's
-   recorded, not treated as a parity violation.
+   recorded, not treated as a parity violation. Every criterion must also
+   name which `mandate.md` section it maps to — one without a mapping gets
+   flagged before it's added, not silently included.
 
-Before any of that: plan checks whether dod-lite is even declared for the
-arms it's about to write checks for. If it isn't, it stops and asks rather
-than authoring checks nobody will ever evaluate — see the dod-lite section.
+Before any of that: plan checks whether `mandate.md` exists at all (see the
+understand section above) and whether dod-lite is even declared for the
+arms it's about to write checks for. If either check fails, it stops and
+asks rather than authoring checks nobody will ever evaluate or that have no
+anchor to the plugin's purpose.
 
 You also choose control's **baseline** for this run here: vanilla (no
 plugin) or pinned to a previous released version of the plugin under test
@@ -159,10 +186,13 @@ Run from the main session once both arms are done. Fuses three layers:
    mismatch, a missing transcript) get surfaced immediately since they can
    invalidate the whole run.
 3. **LLM contextualization** — a dedicated comparator agent reads both
-   transcripts, both metrics files, and both DoD states, and produces a
-   root-cause read with findings explicitly tagged `[OBJECTIVE]` (from the
-   data) vs `[SUBJECTIVE]` (your stated verdict/interpretation) — kept
-   separate on purpose, never blended into one unlabeled score.
+   transcripts, both metrics files, both DoD states, and `mandate.md` (the
+   plugin's stated purpose, if present), and produces a root-cause read with
+   findings explicitly tagged `[OBJECTIVE]` (from the data) vs `[SUBJECTIVE]`
+   (your stated verdict/interpretation) — kept separate on purpose, never
+   blended into one unlabeled score. `mandate.md` doesn't get its own tag; it
+   sharpens WHY a finding matters (squarely in the plugin's stated capability
+   gap, vs. incidental to it).
 
 This agent filters two full transcripts down to relevant excerpts using Grep/
 Read — always works, nothing extra needed. If the optional third-party
@@ -231,9 +261,14 @@ State these plainly if the user seems headed toward breaking one:
   A config change mid-experiment invalidates comparability between runs.
   New config → new experiment (versioned name), not an edit. The one
   exception is `pluginUnderTestRepo`: pure pointer metadata, not an arm
-  config delta, safe to add/edit any time.
+  config delta, safe to add/edit any time. `mandate.md` is the same kind of
+  exception — refresh it anytime via `/ab-bench:understand`, no version bump.
 - **`task.md` must stay plugin-blind.** Any mention of the plugin under
   test, its tools, or a hinted workflow contaminates the run.
+- **`/ab-bench:plan` won't draft anything without `mandate.md`.** It's the
+  anchor for task relevance and DoD-criterion relevance — a run planned
+  without it risks testing something the plugin was never meant to help
+  with.
 - **One model, both arms, always.**
 - **Arms declare their own config explicitly** (`common`/`control`/`test`
   in `env.json`) — they run with `--strict-mcp-config` and explicit

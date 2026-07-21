@@ -9,9 +9,14 @@ drives the plugin's next iteration.
 ## Lifecycle
 
 ```
-/ab-bench:setup    configure experiments_root (once, or to change it later)         ← one-time
-/ab-bench:init     create experiment env (env.json contract, seed/, .dod/, ledger.md)
-/ab-bench:plan     write plugin-blind task.md + pre-register DoD checks   ← per run
+/ab-bench:setup      configure experiments_root (once, or to change it later)       ← one-time
+/ab-bench:init       create experiment env (env.json, seed/, .dod/, ledger.md),
+                     then MANDATORILY runs /ab-bench:understand below
+/ab-bench:understand interview → mandate.md: what the plugin is FOR (domain, capability
+                     gap, good-outcome definition, non-goals, complexity ceiling, weak
+                     spots). Also standalone, re-invokable anytime scope changes.
+/ab-bench:plan     write plugin-blind task.md + pre-register DoD checks,
+                     each justified against mandate.md                    ← per run
 /ab-bench:fire     launch both arms in detached terminals                 ← per run
    (user drives both sessions as normal work; DoD tracks goal completion)
 /ab-bench:analyze  deterministic metrics + session-comparator agent + human verdict
@@ -25,6 +30,10 @@ drives the plugin's next iteration.
 ```
 env.json            experiment contract: model + common/control/test config deltas (locked for the
                      experiment's life) + optional pluginUnderTestRepo (git repo, for baselines below)
+mandate.md          what the plugin under test is FOR — produced by /ab-bench:understand,
+                     mandatory before /ab-bench:plan will draft anything. Metadata, not an arm
+                     config delta, so it's editable anytime (unlike env.json). Never cloned into
+                     seed/ or either arm's workspace.
 seed/               starting files cloned into both workspaces each run
 .dod/               dod-lite's real layout, SHARED across runs via a junction per arm:
                       checks/    real check files authored by /ab-bench:plan (script/prompt/human)

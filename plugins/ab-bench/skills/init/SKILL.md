@@ -7,7 +7,8 @@ description: >-
   "create a test environment", "benchmark this plugin", "test <plugin> against control",
   "start an ab-bench experiment", "I want to A/B test my plugin". Creates the experiment
   folder under the configured experiments root (env.json contract, seed/, .dod/, ledger.md,
-  runs/). Does NOT fire sessions — that is /ab-bench:fire after /ab-bench:plan.
+  runs/), then MANDATORILY invokes /ab-bench:understand to produce mandate.md before finishing.
+  Does NOT fire sessions — that is /ab-bench:fire after /ab-bench:plan.
 argument-hint: "[experiment-name]"
 ---
 
@@ -28,8 +29,10 @@ Resolve the target path. Check what already exists BEFORE creating anything:
   (matches the "never edit env.json mid-experiment" discipline below — a second init would silently
   destroy a locked contract). Read it, show the user a one-line summary (plugin under test, model,
   control/test deltas), and ask: continue straight to `/ab-bench:plan` for the next run, or start a
-  NEW experiment under a different (versioned) name instead? Stop here either way — do not touch
-  this folder further.
+  NEW experiment under a different (versioned) name instead? Also check for `mandate.md` — if it's
+  missing (a legacy experiment created before `/ab-bench:understand` existed), offer to backfill it
+  now via `/ab-bench:understand <experiment-name>` before they move on (safe: mandate.md is metadata,
+  not an arm-config delta, editable anytime). Stop here either way — do not touch this folder further.
 - **Folder exists but `env.json` is missing** (partial/interrupted prior init) → resume, don't restart:
   check each of `seed/`, `.dod/`, `runs/`, `ledger.md` individually and create only whichever is
   ACTUALLY missing (`mkdir` is naturally idempotent for folders — creating one that already exists
@@ -114,7 +117,21 @@ Plugin under test: <ref/path> | Model: <model> | Created: <date>
 |---|---|---|---|---|---|---|
 ```
 
+## Mandatory: produce `mandate.md`
+
+The moment scaffolding above is done (fresh create, or the resumed-partial-init path), invoke
+`/ab-bench:understand` for this experiment BEFORE telling the user init is complete — this is not
+optional and not something to offer, it is the next step of init itself. You already have the
+plugin path/ref, control compensation, common config, and repo path (if given) from the interview
+above; pass that context straight through so `/ab-bench:understand` doesn't re-ask what you already
+know. It writes `<experiment>/mandate.md` — the plugin's stated purpose/goals/complexity ceiling
+that `/ab-bench:plan` cross-checks every task and DoD criterion against. Do not skip this step even
+if the user seems eager to jump straight to `/ab-bench:plan`.
+
 ## Discipline (tell the user after creating)
 
 - Never edit `env.json` between runs of the same experiment version — that breaks run-over-run comparability. New config = new experiment (bump the version suffix).
+- `mandate.md` is different — it's metadata about the plugin's purpose, not arm config, so it's
+  safe to refresh anytime via `/ab-bench:understand <experiment-name>` if the plugin's scope changes,
+  without bumping the experiment version.
 - Next step: `/ab-bench:plan` to define the task and DoDs for run-001.
