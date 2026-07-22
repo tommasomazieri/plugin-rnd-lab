@@ -32,8 +32,9 @@ then explain it to the user in your own words, adapted to what they asked.
 
 Always ground answers in what the installed skills actually do — if the user
 asks something this doc doesn't cover, read the relevant `SKILL.md` under
-`plugins/ab-bench/skills/` or `plugins/dod-lite/skills/` rather than
-guessing.
+`plugins/ab-bench/skills/` rather than guessing. `plugins/dod-lite/` has no
+skills of its own to read — it's a hooks-only engine, see the dod-lite
+section below.
 
 ## The one-paragraph mental model
 
@@ -127,10 +128,10 @@ Two things happen here, in the main session, BEFORE either arm ever starts:
    flagged before it's added, not silently included.
 
 Before any of that: plan checks whether `mandate.md` exists at all (see the
-understand section above) and whether dod-lite is even declared for the
-arms it's about to write checks for. If either check fails, it stops and
-asks rather than authoring checks nobody will ever evaluate or that have no
-anchor to the plugin's purpose.
+understand section above). DoD tracking itself needs no such preflight
+anymore — the engine is mandatory, injected into both arms on every run —
+but plan still stops and asks if a criterion has no anchor to the plugin's
+purpose rather than authoring it anyway.
 
 You also choose control's **baseline** for this run here: vanilla (no
 plugin) or pinned to a previous released version of the plugin under test
@@ -218,24 +219,24 @@ bearings on an experiment you haven't touched in a while.
 
 ## dod-lite — why ab-bench leans on it
 
-dod-lite is a separate plugin (bundled in this same marketplace,
-`dod-lite@plugin-rnd-lab`) that tracks real Definition-of-Done checks
-per session — script/AI-graded/human-judged, enforced every turn via its
-own Stop hook. Without it, ab-bench can still run (metrics + your verdict
-only), but WITH it, `/ab-bench:plan` can pre-register actual pass/fail
-criteria for a run before either arm starts, instead of relying purely on
-token/turn counts and eyeballing.
+dod-lite (`plugins/dod-lite/` in this same repo) tracks real
+Definition-of-Done checks per session — script/AI-graded/human-judged,
+enforced every turn via its Stop hook. It's what lets `/ab-bench:plan`
+pre-register actual pass/fail criteria for a run before either arm starts,
+instead of relying purely on token/turn counts and eyeballing.
 
-The integration is intentionally soft-gated, not silent: `/ab-bench:plan`
-checks `env.json` for a declared `dod-lite` before authoring any check
-files, and refuses to write checks nobody will evaluate. If it's missing
-and no run has fired yet for that experiment, plan offers to add it (safe
-pre-first-run). If a run already fired, adding it now would be a real
-arm-config change — plan offers to skip DoD for this run instead, or start
-a new experiment version with it declared from the start.
+Unlike the standalone dod-lite you may know from other projects, this copy
+is trimmed down to hooks only — no planning skill, no status command, not
+separately installed. It's mandatory on every run: `/ab-bench:fire` injects
+it into both arms automatically (`--plugin-dir`, read live off this repo's
+disk — nothing to install or update separately), and `/ab-bench:plan` is
+the sole place checks ever get designed, always in your main session,
+never live inside an arm. If a run genuinely needs zero checks, plan just
+doesn't write `dod-checks.json` for it — the engine stays loaded either
+way, it just has nothing to enforce.
 
-Full technical contract (exact files/schema dod-lite expects, verified
-against its real source): `plugins/ab-bench/docs/dod-contract.md`.
+Full technical contract (exact files/schema the engine expects):
+`plugins/ab-bench/docs/dod-contract.md`.
 
 ## Optional dependency: context-mode
 
@@ -273,9 +274,10 @@ State these plainly if the user seems headed toward breaking one:
 - **Arms declare their own config explicitly** (`common`/`control`/`test`
   in `env.json`) — they run with `--strict-mcp-config` and explicit
   `enabledPlugins`, so nothing from your global setup leaks in unevenly.
-- **Never run both a free-standing dod-lite install and this bundled
-  `dod-lite@plugin-rnd-lab` copy at the same time** — identical hook set,
-  they'd double-fire. Pick one per machine/session.
+- **DoD tracking is mandatory, not something to declare in `env.json`** —
+  the trimmed engine is injected into both arms on every run automatically.
+  There's no "forgot to enable dod-lite" failure mode anymore; the only
+  per-run choice is whether `/ab-bench:plan` writes any checks at all.
 - **Windows only, for now** — fire spawns detached `cmd.exe` terminals and
   links each arm's `.dod/` via a Windows directory junction.
 

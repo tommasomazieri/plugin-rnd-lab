@@ -1,9 +1,10 @@
 # plugin-rnd-lab
 
 A Claude Code **marketplace** for plugin R&D tooling — instruments for testing, measuring, and
-iterating on other Claude Code plugins. Ships two plugins: **ab-bench** (the A/B harness) and
-**dod-lite** (its recommended Definition-of-Done tracker, bundled here so ab-bench always has a
-working companion available — see "Recommended companion" below).
+iterating on other Claude Code plugins. Ships one plugin: **ab-bench** (the A/B harness). A
+trimmed, hooks-only Definition-of-Done engine (`plugins/dod-lite/`) ships alongside it in this
+repo but is not separately installed — ab-bench loads it directly into every arm session it fires.
+See "DoD tracking" below.
 
 **Who this is for:** you're building (or evaluating) a Claude Code plugin and want proof it
 actually helps — not just a feeling. Not a general-purpose plugin, not a 2-minute install: it's a
@@ -30,33 +31,31 @@ earned its keep, and what to fix before the next iteration.
   rights, unlike a Windows symlink) — trivial to swap for a plain POSIX symlink, that part isn't
   the blocker. Not yet ported to macOS/Linux.
 - Node.js (bundled scripts are plain `.mjs`, no dependencies to install).
-- Recommended: [**dod-lite**](#recommended-companion-dod-lite), bundled in this same marketplace.
-  ab-bench works without it (metrics + your verdict only) but is much stronger with it — see below.
 
 ## Install
 
 ```
 claude plugin marketplace add <path-to-this-repo>
 claude plugin install ab-bench@plugin-rnd-lab
-claude plugin install dod-lite@plugin-rnd-lab
 ```
 
 This repo is typically used as a **local** marketplace source (clone it, point `marketplace add`
-at the local path). Whenever you pull changes to this repo, refresh each plugin's cached copy:
+at the local path). Whenever you pull changes to this repo, refresh ab-bench's cached copy:
 
 ```
 claude plugin marketplace update plugin-rnd-lab
 claude plugin update ab-bench@plugin-rnd-lab
-claude plugin update dod-lite@plugin-rnd-lab
 ```
 
-`plugin update` only refreshes if that plugin's `.claude-plugin/plugin.json` `version` field
-changed — bump it after editing, or the update is a silent no-op. Restart Claude Code sessions
-afterward to pick up the change.
+`plugin update` only refreshes if `.claude-plugin/plugin.json`'s `version` field changed — bump it
+after editing, or the update is a silent no-op. Restart Claude Code sessions afterward to pick up
+the change. `plugins/dod-lite/` needs none of this: ab-bench passes it to each arm via
+`--plugin-dir`, read live off disk at launch time, not through Claude Code's install/cache
+mechanism at all — pulling this repo is enough.
 
-**Don't run a standalone dod-lite install and this bundled one at the same time in the same
-Claude Code setup** — two active copies of the same hooks (SessionStart/UserPromptSubmit/
-PreToolUse/Stop) will double-fire. Pick one.
+If you also run a fully-featured standalone dod-lite install (a different, unrelated plugin — see
+`plugins/dod-lite/README.md`) in your own general Claude Code sessions, that's unaffected: it never
+shares a session with the trimmed copy ab-bench injects into its arms.
 
 ## Configure: where experiments live
 
@@ -67,24 +66,24 @@ every experiment (`env.json`, seed files, run history, transcripts). That folder
 skipped that prompt, or want to change the folder later, run `/ab-bench:setup` (user-invoked
 only) any time.
 
-## Recommended companion: dod-lite
+## DoD tracking (built in)
 
-ab-bench integrates with **dod-lite**, a lightweight per-session Definition-of-Done tracker (script
-/ AI-graded / human-judged checks, enforced turn-by-turn). It's what lets ab-bench pre-register
-REAL pass/fail criteria for a run before either arm starts, instead of relying only on token/turn
-metrics and your own eyeballing.
+Every run gets a Definition-of-Done engine (script / AI-graded / human-judged checks, enforced
+turn-by-turn) in both arms — it's how ab-bench pre-registers REAL pass/fail criteria before either
+arm starts, instead of relying only on token/turn metrics and your own eyeballing. This is
+mandatory, not something you enable per experiment: `/ab-bench:fire` injects it into both arms
+every time.
 
-`dod-lite` ships in this same marketplace (`plugins/dod-lite/`) — `claude plugin install
-dod-lite@plugin-rnd-lab` installs it, no separate repo needed. It also works standalone, outside
-ab-bench, in any project.
+The engine itself (`plugins/dod-lite/` in this repo) is a trimmed, hooks-only fork — it enforces
+checks at `Stop`, nothing else. All check *design* happens in `/ab-bench:plan`, in your main
+session, before either arm ever starts; the engine ships no in-session planning skill for an arm
+to invoke, by design — an arm must never design or touch its own DoD.
 
-ab-bench degrades gracefully without it: if you never declare `dod-lite` in an experiment's
-`env.json` `common`/`control`/`test` plugin lists, `/ab-bench:plan` skips DoD-check authoring and
-says so plainly — analysis then leans on metrics + your verdict only. It does NOT silently author
-checks that nothing will ever evaluate.
+If `/ab-bench:plan` decides a given run needs zero checks (a legitimate outcome for a trivial
+task), it simply doesn't write `dod-checks.json` — the engine is still loaded, it just has nothing
+to enforce, and `/ab-bench:analyze` leans on metrics + your verdict only for that run.
 
-Full integration contract (what ab-bench expects from dod-lite, verified against its real source):
-`plugins/ab-bench/docs/dod-contract.md`.
+Full integration contract: `plugins/ab-bench/docs/dod-contract.md`.
 
 ## Optional: faster analysis with context-mode
 
@@ -122,8 +121,8 @@ in. Ask it about one stage specifically too, e.g. `/ab-bench:learn fire`.
    ("... control run-001" / "... test run-001"). Each arm starts with its task and DoD checks
    already wired in — you don't touch either workspace's setup.
 4. **Work both sessions like normal work.** Divergent prompts to unstick one arm are fine — they're
-   measured as bias indicators, not forbidden. Never invoke `dod-lite:planning` inside an arm
-   yourself; checks are already registered.
+   measured as bias indicators, not forbidden. DoD checks are already registered before either arm
+   starts, and dod-lite ships no in-session design skill at all — there's nothing to invoke.
 5. Back in the **main session**: **`/ab-bench:analyze`** with your verdict ("test produced a
    cleaner mesh because xyz"). Get `analysis/report.md`: deterministic deltas, DoD pass/fail per
    arm, an LLM-contextualized root-cause read (objective findings tagged separately from the
@@ -135,11 +134,12 @@ in. Ask it about one stage specifically too, e.g. `/ab-bench:learn fire`.
 ## Repo layout
 
 ```
-.claude-plugin/marketplace.json   marketplace manifest — two entries: ab-bench, dod-lite
+.claude-plugin/marketplace.json   marketplace manifest — one entry: ab-bench
 plugins/ab-bench/                 the A/B harness — skills, agents, hooks, docs
   README.md                       architecture / internals reference (schemas, contracts, scripts)
-plugins/dod-lite/                 the DoD tracker — hooks, planning skill, status command
-  README.md                       how dod-lite works standalone (outside ab-bench too)
+plugins/dod-lite/                 ab-bench's internal DoD engine — hooks-only, no skill/command,
+                                   not listed in marketplace.json, not for standalone use
+  README.md                       what it does inside an ab-bench arm session
 ```
 
 For how ab-bench actually works under the hood — experiment folder layout, the DoD junction trick,

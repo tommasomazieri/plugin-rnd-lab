@@ -11,19 +11,18 @@
  *      agentic_pm_app's REST link-session.
  *
  *   2. DOD REGISTRATION (source "startup" or "clear" only — never on resume/compact,
- *      which would fight dod-lite's own accumulated `history`):
- *      order-independent contract with dod-lite (see docs/dod-contract.md), against its
- *      REAL schema (.dod/sessions/<session_id>.json, dod-lite's own scaffold shape):
+ *      which would fight the accumulated `history`):
+ *      this hook is now the SOLE writer of .dod/sessions/<session_id>.json — the trimmed
+ *      dod-lite engine (plugins/dod-lite, see docs/dod-contract.md) ships no SessionStart
+ *      hook of its own, so there is no foreign hook to race or wait for:
  *        - read runs/run-NNN/dod-checks.json (this arm's check id list); if absent or
  *          no entry for this arm, skip silently (graceful degradation)
- *        - poll up to 5s for .dod/sessions/<session_id>.json (dod-lite's own SessionStart
- *          hook creates it, create-if-absent, via the .dod junction)
- *        - MERGE (never overwrite wholesale): append this arm's check ids into checks[]
- *          (dedup), seed state[id] for new ids using the recorded tier, set
- *          planning_invoked = true (neutralizes dod-lite's own plan-mode gate/nudge so
- *          this arm is never steered into designing its own competing checks)
- *        - if the session file never appears within 5s, create it from scratch using
- *          dod-lite's exact scaffold shape, then merge in the same way
+ *        - create the session file from dod-lite's documented scaffold shape if absent,
+ *          or merge into it if present (never overwrite wholesale) — append this arm's
+ *          check ids into checks[] (dedup), seed state[id] for new ids using the recorded
+ *          tier. `planning_invoked: true` is still set for schema-shape consistency with
+ *          what dod-lite's Stop hook and /ab-bench:analyze expect, but it's cosmetic now —
+ *          no gate hook exists anymore for it to neutralize.
  *
  * Deliberately writes NOTHING to stdout: any injected context would have to be
  * byte-identical across arms to preserve parity, and identifying the arm to the
@@ -81,10 +80,6 @@ function updateManifest(manifestPath, arm, entry) {
   return false;
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 function readJsonSafe(p) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -93,8 +88,8 @@ function readJsonSafe(p) {
   }
 }
 
-// dod-lite's exact scaffold shape (mirrors newSessionScaffold() in its lib.mjs) —
-// used only if dod-lite's own SessionStart hook never shows up within the poll window.
+// dod-lite's documented scaffold shape (mirrors newSessionScaffold() in its lib.mjs) —
+// this hook is the sole creator of the session file now, so this always applies on first touch.
 function dodLiteScaffold(sessionId) {
   return {
     session_id: sessionId,
@@ -124,18 +119,11 @@ function registerDod(dodDir, runDir, arm, sessionId, launchDir) {
   fs.mkdirSync(sessionsDir, { recursive: true });
   const sessionFile = path.join(sessionsDir, `${sessionId}.json`);
 
-  // poll for dod-lite's own SessionStart hook to scaffold the session file first
-  const deadline = Date.now() + 5000;
-  let session = null;
-  let mode = 'created-fresh';
-  while (Date.now() < deadline) {
-    session = readJsonSafe(sessionFile);
-    if (session) {
-      mode = 'merged-existing';
-      break;
-    }
-    sleep(500);
-  }
+  // no foreign SessionStart hook exists anymore to create this first — this hook is the
+  // sole writer, so a brand-new session id always hits the create-fresh path. The
+  // merged-existing path stays in case this ever fires twice for the same session id.
+  let session = readJsonSafe(sessionFile);
+  const mode = session ? 'merged-existing' : 'created-fresh';
   if (!session) session = dodLiteScaffold(sessionId);
 
   session.checks = session.checks || [];

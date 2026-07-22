@@ -103,24 +103,27 @@ Scripts live inside the skill that fires them (`${CLAUDE_SKILL_DIR}/scripts/…`
 | `skills/analyze/scripts/compare-runs.mjs` | agent, in `/ab-bench:analyze` | pair arms, deltas, bias indicators, parity flags |
 | `skills/analyze/scripts/analyze-jsonl.mjs` | library of compare-runs (+ standalone CLI) | deterministic metrics from one session JSONL (usage deduped by message id) |
 | `agents/session-comparator.md` | delegated by `/ab-bench:analyze` | LLM layer: root-cause findings tied to transcript evidence, [SUBJECTIVE]-tagged score |
-| `docs/dod-contract.md` | — | cross-plugin contract with DoD-lightweight (order-independent registration) |
+| `docs/dod-contract.md` | — | contract with the trimmed, hooks-only dod-lite engine ab-bench owns and auto-injects |
 
 ## dod-lite integration
 
-See `docs/dod-contract.md` — read against dod-lite's REAL source, not assumed. dod-lite's
-SessionStart hook is already create-if-absent (verified), but it has NO concept of an externally
-authored template: left alone, its own plan-mode gate pushes each arm session to invent its own
-checks independently. ab-bench prevents that by:
-1. authoring REAL check files in `/ab-bench:plan` (never placeholders — reusing the
-   plugin-under-test's own checker scripts where it ships them),
-2. linking each arm workspace's `.dod` to the shared experiment `.dod/` via a directory junction
-   (required — dod-lite resolves `.dod` as a direct child of cwd, no upward search),
-3. seeding both arms' `.dod/sessions/<session_id>.json` with the SAME check ids (or intentionally
-   different ones, per plugin-native provenance) and `planning_invoked: true` before either arm's
-   session ever gets nudged toward `dod-lite:planning`.
+See `docs/dod-contract.md`. `plugins/dod-lite` in this repo is not the standalone dod-lite — it's a
+trimmed, hooks-only fork purpose-built as ab-bench's arm-side DoD enforcement engine, mandatory on
+every run:
+1. `/ab-bench:plan` authors REAL check files itself (never placeholders — reusing the
+   plugin-under-test's own checker scripts where it ships them) — dod-lite ships no planning skill
+   in this repo at all, so there is no in-session path for an arm to design its own,
+2. `launch-pair.mjs` unconditionally injects `plugins/dod-lite` into both arms via `--plugin-dir`
+   (never an `env.json` declaration) and links each arm workspace's `.dod` to the shared experiment
+   `.dod/` via a directory junction (still required — the engine resolves `.dod` as a direct child
+   of cwd, no upward search),
+3. `arm-session-start.mjs` is the sole writer of `.dod/sessions/<session_id>.json` — it seeds both
+   arms with the SAME check ids (or intentionally different ones, per plugin-native provenance)
+   directly, with no foreign hook to race or wait for.
 
 ab-bench degrades gracefully when no `dod-checks.json` exists for a run — analysis then leans on
-metrics + human verdict only.
+metrics + human verdict only. That's the only way to skip DoD tracking now; the engine itself is
+always present.
 
 ## Known gotcha: transcripts silently missing (fixed)
 

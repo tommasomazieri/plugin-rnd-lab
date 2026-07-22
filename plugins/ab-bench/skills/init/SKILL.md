@@ -67,8 +67,8 @@ launch composes per-arm `--mcp-config` files from the `mcpServers` pool in env.j
 <experiment-name>/
   env.json      ← contract below. Write ONLY if absent (step 0 already handled the exists-case).
   seed/         ← seed files (or empty). mkdir only if absent; never clear an existing seed/.
-  .dod/         ← empty; /ab-bench:plan fills .dod/checks/*, dod-lite fills .dod/sessions/*.
-                  mkdir only if absent.
+  .dod/         ← empty; /ab-bench:plan fills .dod/checks/*, arm-session-start.mjs (fired at
+                  /ab-bench:fire) fills .dod/sessions/*. mkdir only if absent.
   runs/         ← empty. mkdir only if absent — never touch existing runs/run-NNN/ folders.
   ledger.md     ← header only: experiment name, plugin under test, date, table header.
                   Write ONLY if absent — an existing ledger.md holds real run history.

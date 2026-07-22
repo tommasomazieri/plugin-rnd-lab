@@ -1,29 +1,40 @@
-# dod-lite
+# dod-lite (ab-bench arm engine)
 
-Lightweight, per-session Definition-of-Done tracking for Claude Code — no PM app, no MCP server, no external backend. Everything lives in a `.dod/` folder in your project and a handful of hooks.
+**Not a standalone plugin.** This is a trimmed, hooks-only fork of dod-lite, purpose-built as the
+Definition-of-Done enforcement engine ab-bench auto-injects into every control/test arm session it
+fires. It is not listed in `marketplace.json` and is not meant to be installed on its own.
 
-Extracted from a heavier PM-app-coupled DoD engine (`agentic_pm_app` + `project-management-OS-harness`) whose authors deliberately kept the checking logic liftable into a standalone package. This is that extraction.
+If you want full-featured, standalone, per-session DoD tracking for your own projects (in-session
+planning interview, `/dod-lite:status`, etc.), use the free-standing DoD-lightweight install this
+was forked from — never run both an independent dod-lite install and this bundled copy in the same
+session, they share a hook name and would double-fire.
 
-## What it does
+## What it does here
 
-1. At session start, scaffolds `.dod/` in your project and a per-session state file, and reminds you to design this session's DoD checks in plan mode.
-2. While you're in plan mode, nudges you to invoke the `dod-lite:planning` skill — a grill-me-style interview that also decides what "done" means for this session and authors the checks for it.
-3. **Soft-nudges `ExitPlanMode`**: if the planning skill hasn't run yet this session, a reminder is attached to the call — it does not block the call. Skip it freely if the session doesn't need DoD checks.
-4. At every `Stop`, runs the session's checks in three cost-gated tiers — script → AI-graded → human — and blocks the turn from ending until they pass (or the human explicitly waives one).
+ab-bench's `/ab-bench:plan` authors real check files (`.dod/checks/`) and pre-seeds each arm's
+session state (`.dod/sessions/<session_id>.json`) *before* either arm session ever starts —
+checks are never designed live, in-session, by either arm. This plugin's only job is to **enforce**
+that pre-authored set: at every `Stop`, it runs the session's checks in three cost-gated tiers —
+script → AI-graded → human — and blocks the turn from ending until they pass (or a human explicitly
+waives one).
 
-## `.dod/` layout (in your project, not the plugin)
+There is deliberately no `SessionStart`, `UserPromptSubmit`, `PreToolUse`, or `PostToolUse` hook,
+no planning skill, and no status command — an ab-bench arm must never be nudged toward, or even
+able to discover, any DoD-*design* capability. All of that lives in ab-bench's own
+`/ab-bench:plan` skill instead. See `plugins/ab-bench/docs/dod-contract.md` for the full contract
+(schema, file layout, injection mechanics).
+
+## `.dod/` layout (in the shared experiment root, not the plugin)
 
 ```
 .dod/
-  checks/                  ← author-written, reusable across sessions
+  checks/                  ← authored by /ab-bench:plan, reusable across runs of the same experiment
     <id>.py|.mjs|.sh|.ps1|.rb|...   type: script — exit code is the verdict
     <id>.md                          type: prompt or human, via frontmatter
   sessions/
-    <session_id>.json      ← machine-owned, one per session
+    <session_id>.json      ← seeded by ab-bench's arm-session-start.mjs, updated by this plugin's Stop hook
   config.json               ← optional: {"runners": {".ext": "command"}}
 ```
-
-Check id = filename without extension, must be unique within `checks/`.
 
 `.md` check frontmatter:
 ```yaml
@@ -43,48 +54,23 @@ Body = the grading question (prompt) or the question to ask the user (human).
 | prompt | only if all script checks pass | $ + time (spawns a headless `claude -p` subprocess) | strict, conservative AI grader with read-only repo access |
 | human | only if script + prompt checks pass | interrupts the user | `AskUserQuestion`: Done / Not done (+notes) / Stop anyway |
 
-A failing tier skips the tiers after it that round — no point spending money or interrupting the user when a free check already says not-done.
-
-## Install / try locally
-
-```
-claude --plugin-dir <path-to-this-repo>
-claude --debug   # confirm all 5 hooks register: SessionStart, UserPromptSubmit, PostToolUse(Skill), PreToolUse(ExitPlanMode), Stop
-```
-
-## Optional: start sessions in plan mode
-
-dod-lite can't force your session's startup permission mode — that's a settings/CLI concern, not something a hook can intercept. If you want that behavior, add to your project's `.claude/settings.json`:
-
-```json
-{
-  "permissions": { "defaultMode": "plan" }
-}
-```
-
-Without this, dod-lite still works — it just nags (via the `SessionStart` reminder) rather than starting you in plan mode automatically. If you skip plan mode entirely for a session, dod-lite simply stays inactive for it: nothing to gate, nothing to check.
-
-## Commands
-
-- `/dod-lite:status` — read-only summary of the current session's checks and their last results.
-
-## Known implementation risk
-
-`mark-planning.mjs` matches the `Skill` tool's `tool_input.skill` field against `dod-lite:planning` to detect that the planning skill was invoked (confirmed against the tool's own parameter schema at build time: `{skill, args}`). If a future Claude Code version renames this field, the hook falls back to a substring scan of the whole `tool_input`, but verify with `claude --debug` after any Claude Code upgrade if the plan-mode gate stops recognizing the skill.
+A failing tier skips the tiers after it that round — no point spending money or interrupting the
+arm session for nothing when a free check already says not-done.
 
 ## Plugin layout
 
 ```
 .claude-plugin/plugin.json
-hooks/                    session-start.mjs, prompt-nudge.mjs, mark-planning.mjs,
-                           plan-gate.mjs, dod-check.mjs, lib.mjs, hooks.json
-skills/planning/SKILL.md
-commands/status.md
+hooks/                    dod-check.mjs, lib.mjs, hooks.json (Stop only)
 resources/prompt-checker-system.md   (grading rubric appended to headless checker calls)
 ```
 
 ## Design notes
 
-- No custom stall/cooldown counter anywhere — Claude Code's native cap (stops issuing further `Stop` blocks after 8 consecutive ones) is the safety net. Script checks intentionally re-run every turn uncached, since any edit can regress a previously-passing one.
-- The prompt-tier checker runs under `--permission-mode plan`, not a hardcoded `--allowedTools` list — that's a generic read-only guarantee that also covers project-specific MCP tools (e.g. a Blender MCP server's read-only tools), not just Claude Code's builtins.
-- Every hook fails open: an internal dod-lite bug logs to stderr and exits 0, it never blocks an unrelated session.
+- Every hook fails open: an internal bug logs to stderr and exits 0, it never blocks an unrelated
+  session.
+- The prompt-tier checker runs under `--permission-mode plan`, not a hardcoded `--allowedTools`
+  list — a generic read-only guarantee that also covers project-specific MCP tools, not just
+  Claude Code's builtins.
+- Still resolves `.dod/` as a direct child of `cwd`, no upward search — each arm workspace needs
+  `.dod` linked (directory junction) to the shared experiment-root `.dod/`. See `dod-contract.md`.

@@ -82,30 +82,14 @@ leave it out and say so.
 Full schema and rationale: `${CLAUDE_SKILL_DIR}/../../docs/dod-contract.md`. Read it if unsure of
 dod-lite's exact file formats before writing anything.
 
-### 4.0 Preflight — is dod-lite actually going to run for this experiment?
+DoD tracking is mandatory, not opt-in: ab-bench auto-injects the trimmed dod-lite engine into both
+arms on every run (`launch-pair.mjs`, unconditional `--plugin-dir`) — there's no `env.json`
+declaration to check, and no way for a check to end up inert because dod-lite wasn't loaded. The
+only legitimate way to skip DoD for a specific run is to not write `dod-checks.json` at all (see
+the graceful-degradation note in 4d) — say so plainly if that's what the user wants, rather than
+running the interview below.
 
-Check `env.json`'s `common`/`control`/`test` blocks (`plugins` + `pluginDirs` arrays) for an entry
-that resolves to the `dod-lite` plugin, for whichever arm(s) you're about to write checks for. If
-it's missing from an arm's config:
-
-**STOP — do not run the interview below.** Writing check files nobody will ever evaluate is worse
-than writing none: dod-lite's hooks won't be loaded in that arm, so every check sits at `pending`
-forever and `/ab-bench:analyze` will misreport it as "nothing passed" instead of "tracking was
-never active." Tell the user plainly: dod-lite isn't declared for this arm, DoD checks would be
-inert, and offer the legitimate options —
-- **No run has fired yet for this experiment** (this would be run-001): adding `dod-lite` to
-  `env.json` now is fine, nothing to break comparability with yet — add it, then continue with 4a.
-- **A prior run already fired** (run-002+): adding `dod-lite` to `env.json` now IS a mid-experiment
-  edit and breaks run-over-run comparability — the existing "never edit env.json mid-experiment"
-  lock applies here same as anywhere else, this is an actual arm config delta, not metadata like
-  `pluginUnderTestRepo`. Don't do it. Offer instead: skip DoD entirely for this run (don't write
-  `dod-checks.json` — see the graceful-degradation note at the end of this section), or start a
-  NEW experiment version with dod-lite declared from the start (`/ab-bench:init` again, bumped
-  version suffix, per the existing discipline).
-
-Do not silently proceed with authoring checks in any case.
-
-### 4a. Interview for criteria (same rigor as dod-lite's own planning skill)
+### 4a. Interview for criteria
 
 Draft candidate criteria that would actually distinguish "done" from "not done" for THIS task. For
 each, decide the tier:
@@ -121,8 +105,8 @@ it: either it's testing territory outside the plugin's stated purpose (drop it),
 incomplete and should be refreshed via `/ab-bench:understand` (do that first, then resume here).
 
 Present the list (what + tier + mandate.md mapping, not draft file contents yet) to the user,
-iterate until agreed — same proposal-then-author order as dod-lite's `planning` skill. Zero
-checks can be a legitimate outcome for a trivial task.
+iterate until agreed — propose before authoring, never the reverse. Zero checks can be a
+legitimate outcome for a trivial task.
 
 ### 4b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
 
@@ -148,8 +132,8 @@ mesh-validation scripts). If a plugin-native script already covers a criterion:
   with different `origin`. That's expected when driven by a plugin-native checker, not a parity
   violation — record `source`/`origin` (see 4d) so `/ab-bench:analyze` explains it instead of flagging it.
 
-List `.dod/checks/` first (same as dod-lite's own skill) — reuse an existing id if a prior run
-already covers the same intent, don't duplicate.
+List `.dod/checks/` first — reuse an existing id if a prior run already covers the same intent,
+don't duplicate.
 
 ### 4c. Author real check files into `<experiment>/.dod/checks/`
 
@@ -186,8 +170,9 @@ check FILES in `.dod/checks/` are the experiment-level shared/reused state.
 ```
 
 The `arm-session-start.mjs` hook reads this file at fire time and seeds each arm's
-`.dod/sessions/<session_id>.json` with exactly this list — that's what makes checks apply seamlessly
-without either arm ever needing to invoke `dod-lite:planning` itself.
+`.dod/sessions/<session_id>.json` with exactly this list — that's what makes checks apply
+seamlessly without either arm ever designing its own. dod-lite ships no planning skill in this
+repo at all, so there's no in-session path to invoke even if an arm wanted to.
 
 If the user wants to skip DoD tracking for this run entirely: don't write `dod-checks.json` at all
 (ab-bench degrades gracefully — analysis then leans on metrics + human verdict only). Say so plainly

@@ -18,7 +18,9 @@
  *      (arm-session-start.mjs: manifest linkage + .dod registration)
  *   5. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json — control's
  *      pluginDirs also get runs/run-NNN/baseline.json's worktree paths layered in, if that run
- *      pinned control to a previous version instead of vanilla (see /ab-bench:plan step 2)
+ *      pinned control to a previous version instead of vanilla (see /ab-bench:plan step 2). Both
+ *      arms unconditionally also get DOD_LITE_DIR (plugins/dod-lite, the trimmed hooks-only DoD
+ *      engine) appended — mandatory every run, never an env.json opt-in.
  *   6. spawn a detached titled terminal running:
  *      claude --model M --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
  *
@@ -37,6 +39,11 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ARM_HOOK_SCRIPT = path.join(SCRIPT_DIR, 'arm-session-start.mjs');
+// The trimmed, hooks-only DoD engine (plugins/dod-lite) — mandatory on every run, injected via
+// --plugin-dir the same way a previous-version baseline's worktree is, never via env.json/
+// enabledPlugins. Not listed in marketplace.json; not independently installable. See
+// docs/dod-contract.md.
+const DOD_LITE_DIR = path.resolve(SCRIPT_DIR, '..', '..', '..', '..', 'dod-lite');
 const ARMS = ['control', 'test'];
 const OPENING_PROMPT =
   'Read TASK.md in this directory and carry out the assignment exactly as written. Treat TASK.md as your task brief.';
@@ -129,13 +136,23 @@ function loadGlobalEnabledPlugins() {
   }
 }
 
+// DoD tracking is mandatory, never an env.json opt-in — strip any stray legacy "dod-lite"
+// reference (marketplace ref or raw pluginDir) so an old experiment config can never cause a
+// double-load once DOD_LITE_DIR is unconditionally appended below.
+function stripDodLite(refs) {
+  return refs.filter((r) => !/dod-lite/i.test(r));
+}
+
 function composeArm(env, arm, globalEnabled, baseline) {
-  const plugins = [...env.common.plugins, ...env[arm].plugins];
+  const plugins = stripDodLite([...env.common.plugins, ...env[arm].plugins]);
   const baselineDirs =
     arm === 'control' && baseline.control_baseline.type === 'previous-version'
       ? baseline.control_baseline.pluginDirs
       : [];
-  const pluginDirs = [...env.common.pluginDirs, ...env[arm].pluginDirs, ...baselineDirs].map((p) => path.resolve(p));
+  const pluginDirs = [
+    ...stripDodLite([...env.common.pluginDirs, ...env[arm].pluginDirs, ...baselineDirs]),
+    DOD_LITE_DIR,
+  ].map((p) => path.resolve(p));
   const mcpNames = [...env.common.mcp, ...env[arm].mcp];
   const mcpServers = {};
   for (const name of mcpNames) {
@@ -256,6 +273,7 @@ function main() {
 
   parity.equal.model = env.model;
   parity.equal.prompt = OPENING_PROMPT;
+  parity.equal.dod_engine = DOD_LITE_DIR;
   parity.equal.common_plugins = env.common.plugins;
   parity.equal.common_pluginDirs = env.common.pluginDirs;
   parity.equal.common_mcp = env.common.mcp;
