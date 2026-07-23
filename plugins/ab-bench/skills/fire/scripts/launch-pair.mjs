@@ -3,16 +3,22 @@
  * launch-pair.mjs — fire the control/test session pair for the next planned run.
  *
  * Usage:
- *   node launch-pair.mjs <envRoot> [--run run-003] [--dry-run]
+ *   node launch-pair.mjs <configRoot> <testenvRoot> [--run run-003] [--dry-run]
  *
- * <envRoot> is an experiment folder containing env.json (see docs/env-schema in README).
- * Picks the latest runs/run-NNN that has task.md but no manifest.json (i.e. planned,
- * not yet fired), unless --run is given.
+ * Two-root split (see docs/dod-contract.md): <configRoot> is <plugin-repo>/.ab-bench/
+ * mandate-N/envs/env-M/ (holds env.json only). <testenvRoot> is the paired
+ * <experiments_root>/<plugin-folder-name>/mandate-N/env-M/ folder (holds seed/, .dod/,
+ * baselines/, runs/ — everything a run actually materializes on disk). mandate/env ids are
+ * read straight off configRoot's own path (.../mandate-N/envs/env-M) rather than passed
+ * separately, so there's exactly one source of truth for "which env is this."
+ *
+ * Picks the latest runs/run-NNN (under testenvRoot) that has task.md but no manifest.json
+ * (i.e. planned, not yet fired), unless --run is given.
  *
  * For each arm (control, test):
  *   1. clone seed/ into the arm workspace
  *   2. copy task.md -> <workspace>/TASK.md
- *   3. link <workspace>/.dod as a directory junction to <envRoot>/.dod — REQUIRED because
+ *   3. link <workspace>/.dod as a directory junction to <testenvRoot>/.dod — REQUIRED because
  *      dod-lite resolves .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
  *   4. write <workspace>/.claude/settings.json with the SessionStart linkage hook
  *      (arm-session-start.mjs: manifest linkage + .dod registration)
@@ -54,21 +60,32 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const args = { envRoot: null, run: null, dryRun: false };
+  const args = { configRoot: null, testenvRoot: null, run: null, dryRun: false };
+  const positional = [];
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') args.dryRun = true;
     else if (a === '--run') args.run = argv[++i];
-    else if (!args.envRoot) args.envRoot = path.resolve(a);
-    else fail(`unexpected argument: ${a}`);
+    else positional.push(a);
   }
-  if (!args.envRoot) fail('usage: node launch-pair.mjs <envRoot> [--run run-NNN] [--dry-run]');
+  if (positional.length < 2) fail('usage: node launch-pair.mjs <configRoot> <testenvRoot> [--run run-NNN] [--dry-run]');
+  args.configRoot = path.resolve(positional[0]);
+  args.testenvRoot = path.resolve(positional[1]);
   return args;
 }
 
-function loadEnv(envRoot) {
-  const envPath = path.join(envRoot, 'env.json');
-  if (!fs.existsSync(envPath)) fail(`env.json not found in ${envRoot}`);
+// mandate/env ids live entirely in configRoot's own path shape
+// (.ab-bench/mandate-N/envs/env-M) — derived here rather than passed as separate flags so
+// there's exactly one source of truth.
+function lineageFromConfigRoot(configRoot) {
+  const envId = path.basename(configRoot);
+  const mandateId = path.basename(path.dirname(path.dirname(configRoot)));
+  return { mandate: mandateId, env: envId };
+}
+
+function loadEnv(configRoot) {
+  const envPath = path.join(configRoot, 'env.json');
+  if (!fs.existsSync(envPath)) fail(`env.json not found in ${configRoot}`);
   let env;
   try {
     env = JSON.parse(fs.readFileSync(envPath, 'utf8'));
@@ -103,8 +120,8 @@ function loadBaseline(runDir) {
   }
 }
 
-function findRun(envRoot, explicit) {
-  const runsDir = path.join(envRoot, 'runs');
+function findRun(testenvRoot, explicit) {
+  const runsDir = path.join(testenvRoot, 'runs');
   if (explicit) {
     const dir = path.join(runsDir, explicit);
     if (!fs.existsSync(path.join(dir, 'task.md'))) fail(`${explicit} has no task.md — plan the run first`);
@@ -170,8 +187,8 @@ function composeArm(env, arm, globalEnabled, baseline) {
   return { plugins, pluginDirs, mcpServers, enabledPlugins };
 }
 
-function copySeed(envRoot, workspace) {
-  const seed = path.join(envRoot, 'seed');
+function copySeed(testenvRoot, workspace) {
+  const seed = path.join(testenvRoot, 'seed');
   if (fs.existsSync(seed) && fs.readdirSync(seed).length > 0) {
     fs.cpSync(seed, workspace, { recursive: true });
   }
@@ -255,12 +272,13 @@ function spawnTerminal(title, batchFile) {
 }
 
 function main() {
-  const { envRoot, run, dryRun } = parseArgs(process.argv);
-  const env = loadEnv(envRoot);
-  const runDir = findRun(envRoot, run);
+  const { configRoot, testenvRoot, run, dryRun } = parseArgs(process.argv);
+  const env = loadEnv(configRoot);
+  const lineage = lineageFromConfigRoot(configRoot);
+  const runDir = findRun(testenvRoot, run);
   const runName = path.basename(runDir);
   const launchDir = path.join(runDir, '.launch');
-  const dodDir = path.join(envRoot, '.dod');
+  const dodDir = path.join(testenvRoot, '.dod');
   const manifestPath = path.join(runDir, 'manifest.json');
   fs.mkdirSync(launchDir, { recursive: true });
   fs.mkdirSync(dodDir, { recursive: true });
@@ -304,6 +322,8 @@ function main() {
   const manifest = {
     schema: 1,
     experiment: env.experiment,
+    mandate: lineage.mandate,
+    env: lineage.env,
     run: runName,
     created_at: new Date().toISOString(),
     model: env.model,
@@ -340,7 +360,7 @@ function main() {
     if (dryRun) continue;
 
     fs.mkdirSync(workspace, { recursive: true });
-    copySeed(envRoot, workspace);
+    copySeed(testenvRoot, workspace);
     fs.copyFileSync(path.join(runDir, 'task.md'), path.join(workspace, 'TASK.md'));
     linkDodFolder(workspace, dodDir);
     writeWorkspaceSettings(workspace, manifestPath, arm, dodDir);

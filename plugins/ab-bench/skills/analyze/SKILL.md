@@ -7,14 +7,25 @@ description: >-
   sessions are done", "analyze the run", "test session was better because...", "control won
   this time", "run the ab analysis", "compare the two sessions". Writes
   runs/run-NNN/analysis/ and appends ledger.md.
-argument-hint: "[experiment-name] [verdict statement]"
+argument-hint: "[verdict statement]"
 ---
 
 # ab-bench: analyze run
 
 Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
 reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
-Identify experiment + run (default: latest fired run with linked arms and no `analysis/report.md`).
+
+**Resolve current env** (same two-root pattern as `/ab-bench:plan`/`/ab-bench:fire`):
+
+```
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" find-repo-root "<cwd>"
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" detect "<repoRoot>" "${user_config.experiments_root}"
+```
+
+Gives you `configRoot` (env.json's parent), `mandateFile`, and `testenvRoot` (where
+`runs/run-NNN/` actually lives — `compare-runs.mjs` derives it back out of `runDir` itself, so
+you only need `testenvRoot` to locate the run). Identify the run (default: latest fired run
+under `testenvRoot/runs/` with linked arms and no `analysis/report.md`).
 
 ## 1. Capture the human verdict
 
@@ -37,9 +48,11 @@ them immediately — a model mismatch or missing transcript may invalidate the r
 Delegate to the **session-comparator** agent (plugin agent, `ab-bench:session-comparator`).
 Its task prompt must contain: absolute paths to comparison.json, both metrics files, both
 transcripts (from manifest.json — last session segment per arm), both
-`.dod/sessions/<session-id>.json` paths (note if absent), `runs/run-NNN/dod-checks.json` path
-(note if absent), env.json path, `mandate.md` path (note if absent — legacy experiment), and the
-verbatim human verdict. Nothing else — the agent knows its method and output format.
+`testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent),
+`runs/run-NNN/dod-checks.json` path (note if absent), `configRoot/env.json` path, `mandateFile`
+path (note if absent — legacy experiment; read `manifest.json`'s `mandate`/`env` fields to
+confirm you're pointing at the right one if it's ambiguous), and the verbatim human verdict.
+Nothing else — the agent knows its method and output format.
 
 ## 4. Write analysis/report.md
 
@@ -64,13 +77,15 @@ mark the rest as TODO items targeting the plugin-under-test repo>
 
 ## 5. Append the ledger row
 
-Add to `<experiment>/ledger.md`: run, control baseline (`vanilla` or `previous-version@<ref>` — read
+Add to `testenvRoot/ledger.md`: run, control baseline (`vanilla` or `previous-version@<ref>` — read
 `manifest.json`'s `arms.control.baseline`, don't re-derive it), date, one-word verdict (test-won /
 control-won / wash / contaminated), subjective score, single most important delta, relative path to
 report.md.
 
 ## 6. Close the loop
 
-Tell the user the top recommendation and remind: apply fixes to the plugin-under-test in its own
-repo (separate dev session), then `/ab-bench:plan` for the next run. ab-bench never edits the
-plugin under test itself.
+Tell the user the top recommendation and remind: apply fixes to the plugin-under-test in ITS OWN
+repo — which, unlike before, is very likely the SAME repo this main session is already CD'd into;
+don't confuse "editing the plugin" with "touching `.ab-bench/` or the testenv folder," those are
+never where the plugin's actual source lives. Then `/ab-bench:plan` for the next run. ab-bench
+never edits the plugin under test itself.

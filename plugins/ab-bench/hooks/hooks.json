@@ -1,0 +1,13 @@
+{
+  "description": "ab-bench main-session context: on every session start, cheaply checks whether cwd (or a parent) is a plugin repo with .ab-bench/ set up, and if so injects the current mandate/env/testenv location so the session doesn't need to be told where things are.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-context.mjs"], "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

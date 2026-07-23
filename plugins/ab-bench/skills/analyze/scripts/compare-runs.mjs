@@ -45,8 +45,9 @@ function readJsonSafe(p) {
   }
 }
 
-// runDir = <envRoot>/runs/run-NNN
-function envRootFromRunDir(runDir) {
+// runDir = <testenvRoot>/runs/run-NNN — same two-levels-up shape regardless of the
+// two-root split (only where testenvRoot itself lives moved; this function's logic didn't).
+function testenvRootFromRunDir(runDir) {
   return path.dirname(path.dirname(runDir));
 }
 
@@ -101,12 +102,12 @@ export function compareRun(runDir) {
   const tModels = Object.keys(t.models).sort().join(',');
   if (cModels !== tModels) flags.push(`MODEL PARITY VIOLATION: control=[${cModels}] test=[${tModels}]`);
 
-  // DoD tracking (dod-lite's real schema: .dod/sessions/<session_id>.json at env root)
-  const envRoot = envRootFromRunDir(runDir);
+  // DoD tracking (dod-lite's real schema: .dod/sessions/<session_id>.json at testenv root)
+  const testenvRoot = testenvRootFromRunDir(runDir);
   const dodChecksDef = readJsonSafe(path.join(runDir, 'dod-checks.json'));
   const dodSessions = {};
   for (const arm of ARMS) {
-    dodSessions[arm] = readJsonSafe(path.join(envRoot, '.dod', 'sessions', `${metrics[arm].session_id}.json`));
+    dodSessions[arm] = readJsonSafe(path.join(testenvRoot, '.dod', 'sessions', `${metrics[arm].session_id}.json`));
   }
   let dodNote = 'no runs/run-NNN/dod-checks.json — DoD tracking not used for this run';
   if (dodChecksDef) {

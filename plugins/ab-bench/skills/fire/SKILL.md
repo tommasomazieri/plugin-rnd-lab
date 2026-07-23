@@ -4,8 +4,9 @@ description: >-
   detached terminals with everything-else-equal configs. User-invoke only (side effects:
   spawns terminals). Use after /ab-bench:plan. Runs scripts/launch-pair.mjs which clones
   seed/ into twin workspaces, composes per-arm --settings + --mcp-config, injects the
-  SessionStart linkage hook, and writes the run manifest.
-argument-hint: "[experiment-name]"
+  SessionStart linkage hook, and writes the run manifest. Run from the plugin-under-test's
+  repo (or a subdirectory) — no argument needed, resolved from .ab-bench/state.json.
+argument-hint: ""
 disable-model-invocation: true
 allowed-tools: Bash(node *) Read
 ---
@@ -14,12 +15,22 @@ allowed-tools: Bash(node *) Read
 
 Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
 reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
-Identify the experiment from $ARGUMENTS or ask.
+
+**Resolve current env** (same two-root pattern as `/ab-bench:plan`):
+
+```
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" find-repo-root "<cwd>"
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" detect "<repoRoot>" "${user_config.experiments_root}"
+```
+
+`{"status":"fresh"}` → tell the user to run `/ab-bench:init` first, stop. Otherwise this gives
+you `envFile`'s parent (**configRoot**, holds `env.json`) and `testenvRoot` (holds `seed/`,
+`.dod/`, `baselines/`, `runs/` — where arm workspaces actually get created).
 
 ## 1. Preflight — dry run first
 
 ```
-node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<envRoot>" --dry-run
+node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<configRoot>" "<testenvRoot>" --dry-run
 ```
 
 Then read `runs/run-NNN/.launch/parity-report.json` and show the user a terse summary:
@@ -38,7 +49,7 @@ checker difference, STOP and fix env.json or `dod-checks.json` before firing.
 On user confirmation:
 
 ```
-node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<envRoot>"
+node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<configRoot>" "<testenvRoot>"
 ```
 
 Two titled terminals open ("AB <experiment> control run-NNN" / "... test ..."). Each arm's

@@ -45,61 +45,91 @@ identical-except-for-the-plugin Claude Code sessions — a **control** arm
 plugin) — then fuses both transcripts, both dod-lite check logs, and your
 own judgement of which output was better into one evidence-backed report.
 Everything runs from a third, separate **main session** — you never run
-ab-bench's own skills inside either arm.
+ab-bench's own skills inside either arm. That main session runs FROM the
+plugin-under-test's own repo (cd into it, start Claude Code there) — ab-bench
+resolves which experiment you mean from cwd, via a gitignored `.ab-bench/`
+folder it creates there; you never type an experiment name or path.
+
+## Two roots — where things actually live
+
+Each experiment splits across two places:
+- **`.ab-bench/` inside the plugin repo** — identity/config only: `env.json`
+  (arm config contract) and `mandate.md` (what the plugin's FOR). Gitignored,
+  never touched by an arm session.
+- **The testenv, under `experiments_root`** — everything a run actually
+  materializes on disk: `seed/`, `.dod/`, `baselines/`, `runs/`. Its path is
+  auto-derived from the plugin repo's own folder name — nothing to name.
+
+They're linked one level deeper too: mandate (1 per plugin, until its actual
+purpose changes) → env (many — one per arm-config version) → run (many per
+env). `mandate.md` is shared by every env under it, never duplicated; a new
+`env.json` is what "new config = new experiment" now actually bumps.
+Full detail: `docs/dod-contract.md`.
 
 ## Stage: setup (`/ab-bench:setup`)
 
 One-time (or whenever you want to relocate). ab-bench needs exactly one
-folder OUTSIDE any project repo where every experiment it ever creates lives
-— `env.json`, seed files, `.dod/`, run history, transcripts, all under
-`<experiments_root>/<experiment-name>/`. This path is stored as the
-plugin's `experiments_root` user-config option (Claude Code's own
-per-plugin settings mechanism), not a bespoke file — it usually gets asked
-for automatically the first time you enable the plugin; `/ab-bench:setup`
+folder OUTSIDE any project repo where every testenv it ever creates lives —
+seed files, `.dod/`, run history, transcripts, all auto-nested under
+`<experiments_root>/<plugin-folder-name>/mandate-N/env-M/`. This path is
+stored as the plugin's `experiments_root` user-config option (Claude Code's
+own per-plugin settings mechanism), not a bespoke file — it usually gets
+asked for automatically the first time you enable the plugin; `/ab-bench:setup`
 is the manual path if you skipped that prompt or want to change it later.
 It's per-machine, not per-project: one shared folder reused across every
 plugin you ever test. Every other ab-bench skill refuses to run until this
 is set.
 
-## Stage: init (`/ab-bench:init <name>`)
+## Stage: init (`/ab-bench:init`)
 
-Creates one experiment's folder and its `env.json` "contract" — the
-locked-in config for both arms. Interviews you for: experiment name
-(kebab-case, versioned if you expect to iterate, e.g. `my-plugin-v0.3`),
-the plugin under test (local path or marketplace ref), what control gets as
-a fair compensation (can be nothing), config BOTH arms share (plugins/MCPs
-— arms run with `--strict-mcp-config` and explicit `enabledPlugins`, so
-nothing leaks in from your global config by accident), one model for both
-arms (no exceptions — that's a confound), starting seed files, and
-optionally the plugin-under-test's own git repo path (unlocks
-previous-version baselines later, see below).
+Run this FROM the plugin-under-test's repo — no name or path argument. First
+time in a repo: scaffolds `.ab-bench/mandate-1/envs/env-1/` there (with
+`env.json`, the locked-in arm-config contract) plus the paired testenv
+folder, appends `.ab-bench/` to the repo's `.gitignore`, and mandatorily
+chains into `/ab-bench:understand` to write `mandate.md`. Interviews you for:
+which folder(s) in this repo are the plugin under test (auto-detected where
+possible), what control gets as a fair compensation (can be nothing), config
+BOTH arms share (plugins/MCPs — arms run with `--strict-mcp-config` and
+explicit `enabledPlugins`, so nothing leaks in from your global config by
+accident), one model for both arms (no exceptions — that's a confound), and
+starting seed files. `pluginUnderTestRepo` is never asked for — it's always
+the repo you're standing in, which is also what unlocks previous-version
+baselines later (see below) automatically, no extra setup.
 
-**Idempotent by design**: re-running init on an experiment that already has
-an `env.json` never overwrites it — it offers to jump to `/ab-bench:plan`
-for the next run, or to start a new versioned experiment instead. This is
-the first place the central discipline shows up: **`env.json` is never
-edited once a run has fired against it.** New config = new experiment
-(bump the version suffix in the name), never a silent edit — otherwise
-later runs stop being comparable to earlier ones.
+**Idempotent by design**: re-running init in a repo that already has
+`.ab-bench/` never overwrites the current `env.json` — it offers three
+branches: continue to `/ab-bench:plan` for the next run, start a **new env**
+under the current mandate (the arm config needs to change — different
+MCP/plugins/model — but the plugin's purpose hasn't), or start a **new
+mandate** (the plugin's actual purpose changed, chains into
+`/ab-bench:understand` for a full re-interview). This is where the central
+discipline lives: **`env.json` is never edited once a run has fired against
+it.** New config = new env, never a silent edit — otherwise later runs stop
+being comparable to earlier ones. Unlike before, that no longer means
+inventing a new mandate.md too when only the arm config changed — mandate.md
+bumps only on the "new mandate" branch, when it actually should.
 
 ## Stage: understand (`/ab-bench:understand`)
 
 Closes a gap the rest of the lifecycle used to have: init captured WHICH plugin is under test,
 but never WHAT it's actually for — so plan had no anchor beyond in-the-moment judgement when
 drafting task.md or picking DoD checks. `/ab-bench:init` now MANDATORILY invokes this right
-after scaffolding a fresh experiment (reusing context init already collected — plugin path,
-control compensation, repo path — never re-asking). It's a grill-me-style interview across seven
-categories: domain/environment, the capability gap the plugin fills, the target user's
-before/after workflow, a concrete definition of a good outcome, explicit non-goals, the
-appropriate task-complexity ceiling, and known weak spots worth stress-testing. Output:
-`<experiment>/mandate.md` — read-only background for main-session skills, never cloned into
-either arm's workspace (would break task.md's plugin-blind requirement).
+after scaffolding a fresh mandate (a fresh repo's first init, or its "new mandate" branch —
+reusing context init already collected: plugin dirs, control compensation, repo path — never
+re-asking). It's a grill-me-style interview across seven categories: domain/environment, the
+capability gap the plugin fills, the target user's before/after workflow, a concrete definition
+of a good outcome, explicit non-goals, the appropriate task-complexity ceiling, and known weak
+spots worth stress-testing. Output: `.ab-bench/mandate-N/mandate.md` — read-only background for
+main-session skills, shared by every env under that mandate, never cloned into either arm's
+workspace (would break task.md's plugin-blind requirement).
 
 Unlike `env.json`, mandate.md is safe to edit anytime — it's metadata about purpose, not an arm
-config delta. Re-invoke it standalone (`/ab-bench:understand <experiment-name>`) whenever the
-plugin's scope evolves, no version bump needed; it does a full re-interview, never a partial
-patch. `/ab-bench:plan` refuses to draft a task or DoD checks if mandate.md is missing (a legacy
-experiment predating this feature) — it'll tell you to run this first.
+config delta. Re-invoke it standalone (`/ab-bench:understand`, run from the plugin repo) whenever
+the plugin's scope evolves — it'll offer to refresh the CURRENT mandate in place, or point you at
+`/ab-bench:init`'s "new mandate" branch if the change is big enough to warrant a whole new version
+instead. Full re-interview either way, never a partial patch. `/ab-bench:plan` refuses to draft a
+task or DoD checks if mandate.md is missing (a legacy setup predating this feature) — it'll tell
+you to run this first.
 
 ## Stage: plan (`/ab-bench:plan`)
 
@@ -285,6 +315,7 @@ State these plainly if the user seems headed toward breaking one:
 
 After the walkthrough (or the focused answer), tell the user the natural
 next command given where they are: nothing set up yet → `/ab-bench:setup`;
-set up but no experiment → `/ab-bench:init <name>`; experiment exists, no
-plan → `/ab-bench:plan`; planned but not fired → `/ab-bench:fire`; fired →
+set up but no experiment in this repo yet → cd into the plugin repo, run
+`/ab-bench:init`; experiment exists, no plan → `/ab-bench:plan`; planned but
+not fired → `/ab-bench:fire`; fired →
 go work both arms; both arms done → `/ab-bench:analyze`.

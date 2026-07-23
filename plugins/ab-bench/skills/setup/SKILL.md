@@ -12,9 +12,12 @@ allowed-tools: Bash(node *) Read Write
 
 # ab-bench: setup
 
-ab-bench needs ONE folder outside any project repo to hold every experiment it ever creates
-(`<experiments_root>/<experiment-name>/…` — env.json, seed files, `.dod/`, run history,
-transcripts). This is stored as the plugin's `experiments_root` [user configuration](
+ab-bench needs ONE folder outside any project repo to hold what every experiment run actually
+materializes on disk (`<experiments_root>/<plugin-folder-name>/mandate-N/env-M/…` — seed files,
+`.dod/`, run history, transcripts; auto-derived from the plugin repo you run `/ab-bench:init`
+in, nothing to name here). The identity/config half — `env.json`, `mandate.md` — lives inside
+the plugin-under-test's own repo instead, in a gitignored `.ab-bench/` folder. This experiments
+root is stored as the plugin's `experiments_root` [user configuration](
 https://code.claude.com/docs/en/plugins-reference#user-configuration) option — the official
 Claude Code mechanism for exactly this, not a bespoke config file. Claude Code normally prompts
 for it automatically the first time you enable the plugin; this skill exists for anyone who
@@ -44,8 +47,8 @@ node -e "require('fs').mkdirSync(process.argv[1], { recursive: true })" "<resolv
 ```
 
 Don't refuse or warn if the folder already exists and has content — it's meant to be reused
-across every experiment; each experiment gets its own named subfolder later, nothing here writes
-outside that.
+across every plugin you ever test; each one gets its own auto-derived subfolder later
+(`<plugin-folder-name>/mandate-N/env-M/`), nothing here writes outside that.
 
 ## 4. Save it — merge into `~/.claude/settings.json`, never blind-overwrite
 
@@ -76,7 +79,8 @@ unsure, don't guess silently.
 Tell the user: experiments root saved to `<resolved-path>`. If this session already loaded
 `${user_config.experiments_root}` as empty earlier in this same conversation, a session restart
 (or `/reload-plugins`) may be needed before other ab-bench skills pick up the new value — mention
-it, don't assume. Next step: `/ab-bench:init <experiment-name>`.
+it, don't assume. Next step: cd into the plugin's own repo and run `/ab-bench:init` there — no
+experiment name to type, ab-bench figures out which plugin from cwd.
 
 Mention once, briefly, as optional (not required — don't dwell on it): the third-party
 `context-mode` MCP plugin (`mksglu/context-mode`) speeds up `/ab-bench:analyze`'s transcript

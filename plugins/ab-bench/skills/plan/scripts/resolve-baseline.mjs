@@ -4,17 +4,24 @@
  * previous-version git worktree checkout of the plugin-under-test.
  *
  * Usage:
- *   node resolve-baseline.mjs <envRoot> <runDir> --vanilla
- *   node resolve-baseline.mjs <envRoot> <runDir> --ref <tag-or-commit>
+ *   node resolve-baseline.mjs <configRoot> <testenvRoot> <runDir> --vanilla
+ *   node resolve-baseline.mjs <configRoot> <testenvRoot> <runDir> --ref <tag-or-commit>
+ *
+ * Two-root split (see docs/dod-contract.md): <configRoot> is <plugin-repo>/.ab-bench/
+ * mandate-N/envs/env-M/ (holds env.json — main-session identity, gitignored inside the
+ * plugin-under-test's own repo). <testenvRoot> is the paired
+ * <experiments_root>/<plugin-folder-name>/mandate-N/env-M/ folder (holds seed/, .dod/,
+ * baselines/, runs/ — everything a run actually materializes on disk).
  *
  * --vanilla: writes runs/run-NNN/baseline.json with control_baseline.type = "vanilla"
  *   (today's behavior — control gets nothing beyond env.json's control block).
  *
- * --ref <ref>: requires env.json's `pluginUnderTestRepo` (a git repo). Checks out (or
- *   reuses, if already checked out) a worktree of that repo at <ref>, cached under
- *   <envRoot>/baselines/<sanitized-ref>/ so every future run pinning the same ref reuses
- *   it instead of re-checking out. Globs the worktree for plugin.json files — each
- *   containing folder becomes a control pluginDirs entry (covers monorepos shipping
+ * --ref <ref>: requires env.json's `pluginUnderTestRepo` (a git repo — always set now,
+ *   /ab-bench:init writes it as the plugin repo itself). Checks out (or reuses, if
+ *   already checked out) a worktree of that repo at <ref>, cached under
+ *   <testenvRoot>/baselines/<sanitized-ref>/ so every future run pinning the same ref
+ *   reuses it instead of re-checking out. Globs the worktree for plugin.json files —
+ *   each containing folder becomes a control pluginDirs entry (covers monorepos shipping
  *   multiple plugins, e.g. the blender suite's six plugins from one repo/tag).
  *
  * Writes runs/run-NNN/baseline.json, read by launch-pair.mjs at fire time to layer
@@ -34,7 +41,7 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const args = { envRoot: null, runDir: null, ref: null, vanilla: false };
+  const args = { configRoot: null, testenvRoot: null, runDir: null, ref: null, vanilla: false };
   const positional = [];
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -42,19 +49,20 @@ function parseArgs(argv) {
     else if (a === '--ref') args.ref = argv[++i];
     else positional.push(a);
   }
-  if (positional.length < 2) {
-    fail('usage: node resolve-baseline.mjs <envRoot> <runDir> (--vanilla | --ref <tag-or-commit>)');
+  if (positional.length < 3) {
+    fail('usage: node resolve-baseline.mjs <configRoot> <testenvRoot> <runDir> (--vanilla | --ref <tag-or-commit>)');
   }
-  args.envRoot = path.resolve(positional[0]);
-  args.runDir = path.resolve(positional[1]);
+  args.configRoot = path.resolve(positional[0]);
+  args.testenvRoot = path.resolve(positional[1]);
+  args.runDir = path.resolve(positional[2]);
   if (!args.vanilla && !args.ref) fail('must pass either --vanilla or --ref <tag-or-commit>');
   if (args.vanilla && args.ref) fail('pass either --vanilla or --ref, not both');
   return args;
 }
 
-function loadEnv(envRoot) {
-  const envPath = path.join(envRoot, 'env.json');
-  if (!fs.existsSync(envPath)) fail(`env.json not found in ${envRoot}`);
+function loadEnv(configRoot) {
+  const envPath = path.join(configRoot, 'env.json');
+  if (!fs.existsSync(envPath)) fail(`env.json not found in ${configRoot}`);
   try {
     return JSON.parse(fs.readFileSync(envPath, 'utf8'));
   } catch (e) {
@@ -132,7 +140,7 @@ function findPluginDirs(root) {
 }
 
 function main() {
-  const { envRoot, runDir, ref, vanilla } = parseArgs(process.argv);
+  const { configRoot, testenvRoot, runDir, ref, vanilla } = parseArgs(process.argv);
   if (!fs.existsSync(runDir)) fail(`runDir does not exist: ${runDir}`);
 
   const baselinePath = path.join(runDir, 'baseline.json');
@@ -146,12 +154,12 @@ function main() {
     return;
   }
 
-  const env = loadEnv(envRoot);
+  const env = loadEnv(configRoot);
   const repo = env.pluginUnderTestRepo;
   if (!repo) fail('env.json has no "pluginUnderTestRepo" — set it first (see /ab-bench:init) to pin a previous-version baseline');
   if (!fs.existsSync(repo)) fail(`pluginUnderTestRepo does not exist: ${repo}`);
 
-  const worktreePath = path.join(envRoot, 'baselines', sanitizeRef(ref));
+  const worktreePath = path.join(testenvRoot, 'baselines', sanitizeRef(ref));
   ensureWorktree(repo, ref, worktreePath);
 
   const pluginDirs = findPluginDirs(worktreePath);

@@ -9,27 +9,41 @@ description: >-
   ab-bench run", "define DoDs for the experiment", "pin control to a previous version",
   "test against the last release". Creates runs/run-NNN/task.md, runs/run-NNN/baseline.json
   (control's vanilla-vs-previous-version choice), and runs/run-NNN/dod-checks.json, writes
-  check files into .dod/checks/. Must run before /ab-bench:fire.
-argument-hint: "[experiment-name]"
+  check files into .dod/checks/. Must run before /ab-bench:fire. Run from the plugin-under-test's
+  repo (or a subdirectory) — no argument needed, resolved from .ab-bench/state.json.
+argument-hint: ""
 ---
 
 # ab-bench: plan next run
 
 Experiments live under `${user_config.experiments_root}`. If that's empty or still literally
 reads `${user_config.experiments_root}`, tell the user to run `/ab-bench:setup` first and stop.
-Identify the experiment from $ARGUMENTS or ask. Read its `env.json` and `ledger.md` for context —
-if a prior run's report exists, its "Recommendations for next iteration" section should shape
-this run.
 
-**Preflight — `mandate.md` must exist.** Read `<experiment>/mandate.md`. If it's missing (a
-legacy experiment created before `/ab-bench:understand` existed), STOP: tell the user to run
-`/ab-bench:understand <experiment-name>` first, and do not draft task.md or DoD checks without
-it — designing tasks with no anchor to what the plugin is actually FOR is the exact failure mode
-this file exists to prevent.
+**Resolve current env** (two roots, not one — see docs/dod-contract.md if unfamiliar):
+
+```
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" find-repo-root "<cwd>"
+node "${CLAUDE_SKILL_DIR}/../init/scripts/ab-bench-scaffold.mjs" detect "<repoRoot>" "${user_config.experiments_root}"
+```
+
+`{"status":"fresh"}` → no experiment here — tell the user to run `/ab-bench:init` first, stop.
+Otherwise this gives you `envFile` (**configRoot** = its parent dir — holds `env.json`),
+`mandateFile`, and `testenvRoot` (holds `seed/`, `ledger.md`, `.dod/`, `baselines/`, `runs/`).
+If `$ARGUMENTS` names a different env explicitly (rare — targeting something other than the
+current one), resolve that env's paths the same way instead of the current pointer.
+
+Read `configRoot/env.json` and `testenvRoot/ledger.md` for context — if a prior run's report
+exists, its "Recommendations for next iteration" section should shape this run.
+
+**Preflight — `mandateFile` must exist.** If `detect` reported `mandateExists: false` (a legacy
+or interrupted setup), STOP: tell the user to run `/ab-bench:understand` first, and do not draft
+task.md or DoD checks without it — designing tasks with no anchor to what the plugin is actually
+FOR is the exact failure mode this file exists to prevent.
 
 ## 1. Create the run folder
 
-Next number: scan `runs/`, take highest `run-NNN` + 1 (start at `run-001`). Create `runs/run-NNN/`.
+Next number: scan `testenvRoot/runs/`, take highest `run-NNN` + 1 (start at `run-001`). Create
+`testenvRoot/runs/run-NNN/`. Everything below that references `runs/run-NNN/` means this folder.
 
 ## 2. Choose control's baseline for this run
 
@@ -39,14 +53,14 @@ Default the suggestion to whatever the LAST run in this experiment used (read th
 "same as last run?" first. This choice is per-run, never written to env.json.
 
 - **Vanilla** (or no prior baseline.json exists and the user doesn't want to pin one):
-  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <envRoot> <runDir> --vanilla`
-- **Previous version**: needs `env.json.pluginUnderTestRepo` — if absent, tell the user to add it (a
-  git repo path) before this is possible, and fall back to vanilla for now. Otherwise ask for the
-  tag/commit to pin, then:
-  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <envRoot> <runDir> --ref <tag-or-commit>`
-  This checks out (or reuses, if already cached) a git worktree at `<envRoot>/baselines/<ref>/` and
-  writes `runs/run-NNN/baseline.json` with the resolved `pluginDirs` for control. It fails loudly on a
-  bad ref or missing repo — fix and re-run rather than proceeding without a baseline.
+  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <configRoot> <testenvRoot> <runDir> --vanilla`
+- **Previous version**: needs `env.json.pluginUnderTestRepo` (always set now — it's `repoRoot`,
+  written automatically by `/ab-bench:init`) to actually be a git repo. Ask for the tag/commit to
+  pin, then:
+  `node ${CLAUDE_SKILL_DIR}/scripts/resolve-baseline.mjs <configRoot> <testenvRoot> <runDir> --ref <tag-or-commit>`
+  This checks out (or reuses, if already cached) a git worktree at `<testenvRoot>/baselines/<ref>/`
+  and writes `runs/run-NNN/baseline.json` with the resolved `pluginDirs` for control. It fails
+  loudly on a bad ref or missing repo — fix and re-run rather than proceeding without a baseline.
 
 Either way you now have a real `runs/run-NNN/baseline.json` — `/ab-bench:fire` reads it to compose
 control's config; nothing else in this skill needs to touch it again except step 4b below.
@@ -63,7 +77,7 @@ fixed prompt telling them to execute it. Rules:
 - Concrete deliverables: name the output files/artifacts expected in the workspace.
 - Same task complexity as prior runs if iterating (comparable ledger rows); note in the ledger if
   task difficulty changed.
-- **Justified against `mandate.md`**: before drafting, identify which of mandate.md's sections
+- **Justified against `mandateFile`**: before drafting, identify which of mandate.md's sections
   (capability gap / good-outcome definition / appropriate complexity) this task is meant to
   exercise. State that justification when you show the draft to the user — if you can't point at
   a mandate.md section the task exercises, the task is probably testing something irrelevant to
@@ -110,8 +124,9 @@ legitimate outcome for a trivial task.
 
 ### 4b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
 
-For each agreed criterion, look at the plugin-under-test's repo (path from env.json
-`pluginUnderTestRepo` / test arm's `pluginDirs`) for checker-like tooling it already ships: a
+For each agreed criterion, look at the plugin-under-test's repo (`repoRoot` — same as
+`pluginUnderTestRepo` in env.json, and where this whole session is CD'd into) for checker-like
+tooling it already ships: a
 `checks/`, `qa/`, `validators/`, or similarly-named folder, or anything its README/SKILL.md
 documents as QA/validation scripts meant to grade its own output (e.g. a Blender plugin shipping
 mesh-validation scripts). If a plugin-native script already covers a criterion:
@@ -132,10 +147,10 @@ mesh-validation scripts). If a plugin-native script already covers a criterion:
   with different `origin`. That's expected when driven by a plugin-native checker, not a parity
   violation — record `source`/`origin` (see 4d) so `/ab-bench:analyze` explains it instead of flagging it.
 
-List `.dod/checks/` first — reuse an existing id if a prior run already covers the same intent,
-don't duplicate.
+List `testenvRoot/.dod/checks/` first — reuse an existing id if a prior run already covers the
+same intent, don't duplicate.
 
-### 4c. Author real check files into `<experiment>/.dod/checks/`
+### 4c. Author real check files into `testenvRoot/.dod/checks/`
 
 dod-lite's exact format (id = filename without extension, unique within `checks/`):
 - **script**: `<id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb` — actual working exit-code logic (0 = pass). If

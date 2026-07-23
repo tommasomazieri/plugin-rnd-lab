@@ -8,10 +8,16 @@ drives the plugin's next iteration.
 
 ## Lifecycle
 
+Run every skill FROM the plugin-under-test's own repo (or a subdirectory of it) — no
+experiment name/path to type, ab-bench resolves everything from cwd via `.ab-bench/state.json`.
+
 ```
 /ab-bench:setup      configure experiments_root (once, or to change it later)       ← one-time
-/ab-bench:init       create experiment env (env.json, seed/, .dod/, ledger.md),
-                     then MANDATORILY runs /ab-bench:understand below
+/ab-bench:init       cd into the plugin repo, run this. First time: scaffolds
+                     .ab-bench/mandate-1/envs/env-1/ (env.json) here + a paired testenv
+                     folder, then MANDATORILY runs /ab-bench:understand below. Re-run
+                     later: continue / new env (arm config changed) / new mandate (plugin's
+                     purpose changed) — see "Two roots" below.
 /ab-bench:understand interview → mandate.md: what the plugin is FOR (domain, capability
                      gap, good-outcome definition, non-goals, complexity ceiling, weak
                      spots). Also standalone, re-invokable anytime scope changes.
@@ -21,38 +27,60 @@ drives the plugin's next iteration.
    (user drives both sessions as normal work; DoD tracks goal completion)
 /ab-bench:analyze  deterministic metrics + session-comparator agent + human verdict
                    → analysis/report.md + ledger row                      ← per run
-   (apply report recommendations to the plugin's own repo, then plan the next run)
-/ab-bench:status   state of all experiments/runs at any time
+   (apply report recommendations to the plugin's own repo — the one you're already
+   CD'd into — then plan the next run)
+/ab-bench:status   state of the current repo's experiment (or a named mandate/env) any time
 ```
 
-## Experiment layout (`<experiments_root>\<experiment>\`, see `/ab-bench:setup`)
+## Two roots, not one
+
+ab-bench splits each experiment across two places, joined by `.ab-bench/state.json`:
 
 ```
-env.json            experiment contract: model + common/control/test config deltas (locked for the
-                     experiment's life) + optional pluginUnderTestRepo (git repo, for baselines below)
-mandate.md          what the plugin under test is FOR — produced by /ab-bench:understand,
-                     mandatory before /ab-bench:plan will draft anything. Metadata, not an arm
-                     config delta, so it's editable anytime (unlike env.json). Never cloned into
-                     seed/ or either arm's workspace.
-seed/               starting files cloned into both workspaces each run
-.dod/               dod-lite's real layout, SHARED across runs via a junction per arm:
-                      checks/    real check files authored by /ab-bench:plan (script/prompt/human)
-                      sessions/  per-session trackers, owned by dod-lite, seeded by our hook
-baselines/<ref>/    git worktree checkouts of pluginUnderTestRepo at a pinned tag/commit — cached,
-                     reused across every run that pins the same ref (see "Previous-version baselines")
-ledger.md           run-over-run history table
-runs/run-NNN/
-  task.md           the assignment — identical for both arms, plugin-blind
-  baseline.json     control's baseline this run: vanilla, or previous-version + resolved pluginDirs —
-                     per-run (unlike env.json), written by /ab-bench:plan's resolve-baseline.mjs
-  dod-checks.json   which check ids apply to control/test this run (+ tier + source/origin) — per-run,
-                     NOT inside .dod/ (task-specific, unlike the shared check files)
-  manifest.json     arm → session_id, transcript_path (linked by SessionStart hook); control also
-                     records {type, ref} for its baseline this run
-  .launch/          composed settings/mcp/batch files + parity-report.json + hooks.log
-  control/  test/   twin workspaces (each gets TASK.md, .claude/settings.json hook, .dod junction)
-  analysis/         metrics-*.json, comparison.json, report.md
+<plugin-under-test repo>/           ← where the MAIN session runs (never an arm)
+  .ab-bench/                        ← gitignored, created by /ab-bench:init
+    state.json                      ← pointer: current mandate/env + resolved testenv path
+    mandate-N/
+      mandate.md                    ← ONE per mandate — shared by every env underneath,
+                                        never duplicated. New mandate = plugin's actual
+                                        purpose changed, not just its arm config.
+      envs/env-M/
+        env.json                    ← arm-config contract (model + common/control/test).
+                                        Locked once fired; a config change = new env-(M+1).
+
+${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/   ← the TESTENV,
+    auto-derived from the plugin repo's own folder name — nothing to name
+  seed/               starting files cloned into both workspaces each run
+  ledger.md           run-over-run history table for this env
+  .dod/                dod-lite's real layout, SHARED across runs via a junction per arm:
+                         checks/    real check files authored by /ab-bench:plan
+                         sessions/  per-session trackers, owned by dod-lite, seeded by our hook
+  baselines/<ref>/    git worktree checkouts of pluginUnderTestRepo at a pinned tag/commit —
+                       cached, reused across every run pinning the same ref (see below)
+  runs/run-NNN/
+    task.md           the assignment — identical for both arms, plugin-blind
+    baseline.json     control's baseline this run: vanilla, or previous-version + resolved
+                       pluginDirs — per-run, written by /ab-bench:plan's resolve-baseline.mjs
+    dod-checks.json   which check ids apply to control/test this run (+ tier + source/origin)
+    manifest.json     arm → session_id/transcript_path (linked by SessionStart hook) +
+                       mandate/env lineage; control also records {type, ref} for its baseline
+    .launch/          composed settings/mcp/batch files + parity-report.json + hooks.log
+    control/  test/   twin workspaces (TASK.md, .claude/settings.json hook, .dod junction)
+    analysis/         metrics-*.json, comparison.json, report.md
 ```
+
+A SessionStart hook (`hooks/session-context.mjs`) fires in every session started from inside a
+tracked plugin repo and injects the current mandate/env/testenv location — you never have to
+re-state which experiment you mean.
+
+**Legacy note**: experiments created before this split (flat `<experiments_root>/<experiment-name>/`
+with `env.json`/`mandate.md` inside the testenv folder itself, no `.ab-bench/` anywhere) are left
+on disk untouched — nothing here deletes or auto-migrates them — but every skill listed above now
+resolves paths exclusively through `.ab-bench/state.json`, so a pre-split experiment isn't directly
+usable by them until it's migrated (create `.ab-bench/mandate-1/envs/env-1/` in the plugin's repo,
+move that experiment's `env.json`/`mandate.md` there, point `state.json` at the existing testenv
+folder). Not automated yet — do it by hand, one experiment at a time, when you next need to run
+against it.
 
 ## Parity model (what makes a run valid)
 
@@ -67,8 +95,8 @@ runs/run-NNN/
 - Registration/linkage is pure hook work (`skills/fire/scripts/arm-session-start.mjs`) — zero agent
   tokens, symmetric by construction (except the intentional plugin-native check asymmetry above).
 - Control's IDENTITY (vanilla vs a previous released version) can vary run to run within the same
-  experiment — never silently assumed, always recorded in `manifest.json` + a `ledger.md` column.
-  See "Previous-version baselines" below.
+  env — never silently assumed, always recorded in `manifest.json` + a `ledger.md` column. See
+  "Previous-version baselines" below.
 
 ## Previous-version baselines
 
@@ -76,11 +104,11 @@ Once a plugin under test is far enough along, "does it beat nothing" stops being
 question — "does it beat the last release" is. `/ab-bench:plan` can pin control to a previous
 tag/commit of the plugin under test instead of vanilla, per run:
 
-- Requires `env.json.pluginUnderTestRepo` (a git repo path) — optional, set at `/ab-bench:init` or
-  added later (it's metadata, not an arm config delta, so it isn't covered by the "never edit env.json"
-  lock).
+- Requires `env.json.pluginUnderTestRepo` — always set now (`/ab-bench:init` writes it as the
+  plugin repo you're already CD'd into), so this is available for every experiment as long as
+  that repo is a real git repo.
 - `skills/plan/scripts/resolve-baseline.mjs` does an idempotent `git worktree add` at the chosen ref,
-  cached under `<experiment>/baselines/<ref>/` and reused by every later run pinning the same ref —
+  cached under `<testenvRoot>/baselines/<ref>/` and reused by every later run pinning the same ref —
   never installs a second copy of the plugin, sidestepping the plugin cache entirely (Claude Code only
   ever tracks ONE "current" version per plugin name; `--plugin-dir` loads straight from a folder
   instead, bypassing that limitation completely).
@@ -97,13 +125,16 @@ Scripts live inside the skill that fires them (`${CLAUDE_SKILL_DIR}/scripts/…`
 
 | piece | fired by | role |
 |---|---|---|
+| `lib/state.mjs` | imported by every script below | shared `.ab-bench/` resolution: find repo root, load/save `state.json`, auto-derive testenv path, compute mandate/env ids |
+| `hooks/session-context.mjs` | SessionStart hook, every session | cheap no-op unless cwd is inside a tracked plugin repo; injects current mandate/env/testenv location |
+| `skills/init/scripts/ab-bench-scaffold.mjs` | agent, in `/ab-bench:init` (also read by other skills to `detect`/`find-repo-root`) | mechanical folder/state.json plumbing: create-fresh / create-env / create-mandate, gitignore append |
 | `skills/fire/scripts/launch-pair.mjs` | agent, in `/ab-bench:fire` | compose per-arm configs, spawn detached titled terminals (recipe ported from agentic_pm_app) |
 | `skills/fire/scripts/arm-session-start.mjs` | hook runtime in each ARM session | SessionStart hook injected per workspace: manifest linkage + DoD registration (launch-pair wires its sibling path into workspace settings) |
 | `skills/plan/scripts/resolve-baseline.mjs` | agent, in `/ab-bench:plan` | resolve control's baseline this run: vanilla, or an idempotent git-worktree checkout of the plugin-under-test at a pinned ref, feeding `pluginDirs` |
 | `skills/analyze/scripts/compare-runs.mjs` | agent, in `/ab-bench:analyze` | pair arms, deltas, bias indicators, parity flags |
 | `skills/analyze/scripts/analyze-jsonl.mjs` | library of compare-runs (+ standalone CLI) | deterministic metrics from one session JSONL (usage deduped by message id) |
 | `agents/session-comparator.md` | delegated by `/ab-bench:analyze` | LLM layer: root-cause findings tied to transcript evidence, [SUBJECTIVE]-tagged score |
-| `docs/dod-contract.md` | — | contract with the trimmed, hooks-only dod-lite engine ab-bench owns and auto-injects |
+| `docs/dod-contract.md` | — | contract with the trimmed, hooks-only dod-lite engine ab-bench owns and auto-injects, plus the two-root path layout every skill/script assumes |
 
 ## dod-lite integration
 
@@ -114,7 +145,7 @@ every run:
    plugin-under-test's own checker scripts where it ships them) — dod-lite ships no planning skill
    in this repo at all, so there is no in-session path for an arm to design its own,
 2. `launch-pair.mjs` unconditionally injects `plugins/dod-lite` into both arms via `--plugin-dir`
-   (never an `env.json` declaration) and links each arm workspace's `.dod` to the shared experiment
+   (never an `env.json` declaration) and links each arm workspace's `.dod` to the shared testenv
    `.dod/` via a directory junction (still required — the engine resolves `.dod` as a direct child
    of cwd, no upward search),
 3. `arm-session-start.mjs` is the sole writer of `.dod/sessions/<session_id>.json` — it seeds both

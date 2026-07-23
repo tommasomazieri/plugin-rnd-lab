@@ -8,6 +8,17 @@ was originally forked from. If this contract or dod-lite's schema ever changes, 
 `plugins/dod-lite/hooks/lib.mjs` + `hooks/dod-check.mjs` and update this doc, `arm-session-start.mjs`,
 and the `plan`/`analyze` skills together — they all assume the same schema.
 
+**Also redesigned (same session, layered on top of the above): the two-root split.** ab-bench no
+longer works out of one experiment folder. The main session now runs FROM the plugin-under-test's
+own repo, which holds a gitignored `.ab-bench/` folder (mandate/env identity: `env.json`,
+`mandate.md` — never touched by an arm). Everything an arm session or `launch-pair.mjs` actually
+materializes on disk — `seed/`, `.dod/`, `baselines/`, `runs/` — stays in the paired **testenv**
+folder under `${user_config.experiments_root}`, auto-derived from the plugin repo's folder name
+(no experiment name to invent). `.dod/`'s own schema and the junction requirement below are
+UNCHANGED by this — only WHERE the folder that gets junction-linked lives moved (from a
+user-named experiment folder to an auto-derived testenv folder). See `lib/state.mjs` for the
+shared path-resolution helpers every skill/script uses.
+
 ## Ownership split
 
 - **dod-lite (this repo's trimmed copy)** owns: check file format (`.dod/checks/<id>.<ext>`), the
@@ -48,23 +59,53 @@ what `/ab-bench:analyze` expects, but it is purely cosmetic now — dod-lite shi
 ever reads it. Check id = filename without extension, unique within `checks/`. `checks/` accumulates
 and is reused across runs of the same experiment.
 
-## Filesystem layout in an ab-bench experiment
+## Filesystem layout — two roots, not one
 
 ```
-<experiment>/
+<plugin-under-test repo>/          ← where the MAIN session runs, and where .git lives
+  .gitignore                       ← ab-bench appends ".ab-bench/" here at first /ab-bench:init
+  .ab-bench/                       ← gitignored. Identity/config only — an arm NEVER reads this.
+    state.json                     ← { plugin_repo, experiments_root, testenv_root,
+                                        current_mandate, current_env }
+    mandate-N/
+      mandate.md                   ← written by /ab-bench:understand. ONE per mandate, shared by
+                                       every env underneath — never duplicated per env.
+      envs/
+        env-M/
+          env.json                 ← the arm-config contract (model + common/control/test blocks).
+                                       Locked once a run has fired against it — a config change
+                                       means a new env-(M+1), never an edit.
+
+${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/    ← the TESTENV root,
+    auto-derived (plugin repo's own folder basename — nothing the user names)
+  seed/                    starting files cloned into both workspaces each run
+  ledger.md                run-over-run history table for this env
+  baselines/<ref>/         git worktree checkouts of pluginUnderTestRepo (see "previous-version
+                             baselines" in README) — cached, reused across runs pinning the same ref
   .dod/
     checks/                 ← REAL check files, authored by /ab-bench:plan (script/prompt/human,
-                               dod-lite's exact format). Shared + recycled across runs.
+                               dod-lite's exact format). Shared + recycled across runs of this env.
     sessions/                ← owned entirely by ab-bench's arm-session-start.mjs (sole writer of
                                checks[]/session_goal), updated in place by dod-lite's Stop hook
                                (state{}/history[] only).
   runs/run-NNN/
     dod-checks.json         ← THE PER-RUN ARTIFACT. Lives in the RUN folder, NOT in .dod/ — which
                                checks apply to THIS run is task-specific, while the check FILES in
-                               .dod/checks/ are experiment-level shared state.
-    control/  test/         ← arm workspaces; EACH gets .dod as a directory JUNCTION to the shared
-                               <experiment>/.dod/ (see "Why a junction" below — still required).
+                               .dod/checks/ are env-level shared state.
+    manifest.json            ← arm→session linkage, PLUS mandate/env lineage fields (which
+                               mandate-N/env-M this run belongs to — redundant with folder
+                               location, but makes a stray copy of manifest.json self-describing).
+    control/  test/         ← arm workspaces; EACH gets .dod as a directory JUNCTION to THIS
+                               testenv's own .dod/ (see "Why a junction" below — still required).
 ```
+
+Every skill/script resolves both roots the same way: `find-repo-root` (walk up for `.git`) +
+`detect` against `.ab-bench/state.json` (`skills/init/scripts/ab-bench-scaffold.mjs`), backed by
+`lib/state.mjs`'s `currentPaths()`. `configRoot` always means the `env-M/` folder under
+`.ab-bench/`; `testenvRoot` always means its paired folder under `experiments_root`. A
+SessionStart hook (`hooks/session-context.mjs`) injects the current mandate/env/testenv location
+into every session started from inside the plugin repo, so no skill needs an experiment name
+passed in by hand anymore.
 
 `dod-checks.json` shape (written by `/ab-bench:plan`, read by the `arm-session-start.mjs` hook):
 
@@ -100,7 +141,7 @@ breaking the shared/recycled-across-runs design entirely.
 
 Fix (entirely on ab-bench's side): `launch-pair.mjs` creates `runs/run-NNN/<arm>/.dod` as a Windows
 directory junction (`fs.symlinkSync(target, link, 'junction')`, no admin rights required) pointing
-at `<experiment>/.dod`. Junctions are transparent at the filesystem driver level — the Stop hook,
+at `<testenvRoot>/.dod`. Junctions are transparent at the filesystem driver level — the Stop hook,
 running with cwd = the arm workspace, reads/writes/executes through the junction exactly as if
 `.dod/` were physically there, including running check scripts with the arm's own cwd.
 
@@ -146,14 +187,17 @@ capability — dod-lite ships none.
    `validators/` folder, or anything its README/SKILL.md documents as QA/validation tooling) BEFORE
    writing a generic check for a criterion those scripts already cover — use the plugin's own script
    instead, tagged `source: "plugin-native"` in `dod-checks.json`.
-3. Write REAL, working check files into `<experiment>/.dod/checks/<id>.<ext>` — scripts with actual
+3. Write REAL, working check files into `<testenvRoot>/.dod/checks/<id>.<ext>` — scripts with actual
    exit-code logic, `.md` files with real self-contained grading/human questions. These get executed
    for real by dod-lite's `Stop` hook every turn. No placeholders.
 4. Write `runs/run-NNN/dod-checks.json` recording the final control/test id lists + tier + source.
 
 ## What ab-analyze reads
 
-- `.dod/sessions/<session-id>.json` per arm (semi-opaque past `checks`/`state`/`history` — anything
-  else dod-lite adds is passed through to the session-comparator agent untouched).
+- `<testenvRoot>/.dod/sessions/<session-id>.json` per arm (semi-opaque past `checks`/`state`/
+  `history` — anything else dod-lite adds is passed through to the session-comparator agent
+  untouched).
 - `runs/run-NNN/dod-checks.json` — to explain (not flag as a violation) any control/test check-list
   asymmetry sourced from a plugin-native checker.
+- `<configRoot>/env.json` and `<mandateFile>` (from `.ab-bench/` in the plugin repo, not
+  `testenvRoot`) — the only two artifacts analyze reads from the config side rather than testenv.
