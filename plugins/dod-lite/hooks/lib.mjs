@@ -73,19 +73,26 @@ export async function writeSession(cwd, sessionId, data) {
   await fs.rename(tmp, p);
 }
 
+// .dod/config.json is optional and entirely advisory — a malformed one degrades
+// to defaults rather than taking the hook down with it.
+export async function loadConfig(cwd) {
+  const configPath = path.join(dodDir(cwd), CONFIG_FILE);
+  if (!(await pathExists(configPath))) return {};
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    const config = JSON.parse(raw);
+    return config && typeof config === 'object' ? config : {};
+  } catch (err) {
+    console.error(`dod-lite: ignoring malformed ${configPath}: ${err.message}`);
+    return {};
+  }
+}
+
 export async function loadRunners(cwd) {
   const merged = { ...DEFAULT_RUNNERS };
-  const configPath = path.join(dodDir(cwd), CONFIG_FILE);
-  if (await pathExists(configPath)) {
-    try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const config = JSON.parse(raw);
-      if (config && typeof config.runners === 'object' && config.runners) {
-        Object.assign(merged, config.runners);
-      }
-    } catch (err) {
-      console.error(`dod-lite: ignoring malformed ${configPath}: ${err.message}`);
-    }
+  const config = await loadConfig(cwd);
+  if (config.runners && typeof config.runners === 'object') {
+    Object.assign(merged, config.runners);
   }
   return merged;
 }

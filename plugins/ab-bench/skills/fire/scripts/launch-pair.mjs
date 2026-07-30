@@ -21,7 +21,8 @@
  *   3. link <workspace>/.dod as a directory junction to <testenvRoot>/.dod — REQUIRED because
  *      dod-lite resolves .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
  *   4. write <workspace>/.claude/settings.json with the SessionStart linkage hook
- *      (arm-session-start.mjs: manifest linkage + .dod registration)
+ *      (arm-session-start.mjs: manifest linkage + .dod registration + turn-counter init)
+ *      and the Stop turn-counter hook (arm-turn-count.mjs)
  *   5. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json — control's
  *      pluginDirs also get runs/run-NNN/baseline.json's worktree paths layered in, if that run
  *      pinned control to a previous version instead of vanilla (see /ab-bench:plan step 2). Both
@@ -45,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ARM_HOOK_SCRIPT = path.join(SCRIPT_DIR, 'arm-session-start.mjs');
+const TURN_COUNT_SCRIPT = path.join(SCRIPT_DIR, 'arm-turn-count.mjs');
 // The trimmed, hooks-only DoD engine (plugins/dod-lite) — mandatory on every run, injected via
 // --plugin-dir the same way a previous-version baseline's worktree is, never via env.json/
 // enabledPlugins. Not listed in marketplace.json; not independently installable. See
@@ -195,6 +197,7 @@ function copySeed(testenvRoot, workspace) {
 }
 
 function writeWorkspaceSettings(workspace, manifestPath, arm, dodDir) {
+  const runDir = path.dirname(manifestPath);
   const settings = {
     hooks: {
       SessionStart: [
@@ -208,8 +211,31 @@ function writeWorkspaceSettings(workspace, manifestPath, arm, dodDir) {
                 '--manifest', manifestPath,
                 '--arm', arm,
                 '--dod', dodDir,
+                '--run', runDir,
               ],
               timeout: 30,
+            },
+          ],
+        },
+      ],
+      // Turn counting is ab-bench's own, at project scope, because the arms cannot rely
+      // on the operator's global Stop hook: measured across three fired runs, main arm
+      // sessions ended up with no ~/.claude/turn-counts entry at all or one frozen at 1
+      // while the transcript ran to 600+ lines, which is what made the footer fall back
+      // to its per-assistant-entry guess ("135 turns" vs "1 turn" on the other arm).
+      // /ab-bench:analyze needs a real per-arm turn number, so ab-bench emits it itself.
+      Stop: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: 'node',
+              args: [
+                TURN_COUNT_SCRIPT,
+                '--run', runDir,
+                '--arm', arm,
+              ],
+              timeout: 10,
             },
           ],
         },

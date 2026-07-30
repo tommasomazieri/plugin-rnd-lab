@@ -39,22 +39,46 @@ Record it verbatim — it goes to the comparator and into the report as-is.
 node "${CLAUDE_SKILL_DIR}/scripts/compare-runs.mjs" "<runDir>"
 ```
 
-Produces `analysis/metrics-control.json`, `analysis/metrics-test.json`, `analysis/comparison.json`
-and prints the summary table. Show the table to the user. If PARITY FLAGS are printed, surface
-them immediately — a model mismatch or missing transcript may invalidate the run.
+Produces `analysis/metrics-control.json`, `analysis/metrics-test.json`, `analysis/comparison.json`,
+and — per arm — `analysis/digest-<arm>.md`, a bounded line-anchored narrative of that arm's
+transcript. Prints the summary table. Show the table to the user.
 
-## 3. LLM contextualization layer
+## 3. Read the parity flags yourself — some of them END the analysis
+
+Surface every PARITY FLAG to the user immediately. These five mean the run is **unanalyzable
+as-linked**: report the defect, do NOT proceed to a verdict, do NOT ask the comparator for a
+score, and tell the user what to fix before re-firing.
+
+- `NOT AN ARM SESSION` — the selected transcript is a dod-lite prompt-checker subprocess, so
+  every number describes a grader. Re-select the arm's real session from `manifest.json`.
+- `STUB TRANSCRIPT` — an abandoned or restarted session got linked.
+- `TRANSCRIPT SIZE ASYMMETRY` — the arms did not do comparable amounts of work.
+- `MODEL PARITY VIOLATION`.
+- `TEST ARM RECORDED NO PLUGIN-ATTRIBUTED ACTIVITY` — the plugin was never invoked; nothing
+  this run is attributable to it.
+
+Checks reported `pending` or `error` were never graded — say so as a harness defect, never as
+a quality result.
+
+## 4. LLM contextualization layer
 
 Delegate to the **session-comparator** agent (plugin agent, `ab-bench:session-comparator`).
-Its task prompt must contain: absolute paths to comparison.json, both metrics files, both
-transcripts (from manifest.json — last session segment per arm), both
+Its task prompt must contain: absolute paths to **both `analysis/digest-<arm>.md` files**,
+comparison.json, both metrics files, both raw transcripts (from manifest.json — last session
+segment per arm; the agent uses these only to expand specific `L<n>` anchors), both
 `testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent),
 `runs/run-NNN/dod-checks.json` path (note if absent), `configRoot/env.json` path, `mandateFile`
 path (note if absent — legacy experiment; read `manifest.json`'s `mandate`/`env` fields to
 confirm you're pointing at the right one if it's ambiguous), and the verbatim human verdict.
 Nothing else — the agent knows its method and output format.
 
-## 4. Write analysis/report.md
+**Reject the agent's output and re-delegate once** if it comes back without an `## Evidence
+log` section showing both digests read in full, or if any `[OBJECTIVE]` finding carries no
+`L<n>` / `metric:` citation. An unanchored causal claim is the exact failure this pipeline
+exists to prevent — do not paste one into the report. If the second attempt is still
+unanchored, put the findings in the report under a heading that says they are unverified.
+
+## 5. Write analysis/report.md
 
 Structure:
 
@@ -68,21 +92,27 @@ Structure:
 <summary table + parity flags from step 2>
 
 ## Contextualized analysis
-<session-comparator output, unedited — its [OBJECTIVE]/[SUBJECTIVE] tags must survive>
+<session-comparator output, unedited — its [OBJECTIVE]/[SUBJECTIVE]/[UNVERIFIED] tags and its
+Evidence log and Not-investigated sections must all survive verbatim. Do not tidy them away:
+what the analysis did NOT establish is part of the result.>
 
 ## Next-iteration actions
 <the comparator's recommendations, reviewed: drop any you can refute from the metrics,
 mark the rest as TODO items targeting the plugin-under-test repo>
 ```
 
-## 5. Append the ledger row
+If the run hit a stop condition from step 3, the report is just: human verdict, the
+deterministic table, the parity flags, and a "What to fix before re-firing" list. No verdict,
+no score.
+
+## 6. Append the ledger row
 
 Add to `testenvRoot/ledger.md`: run, control baseline (`vanilla` or `previous-version@<ref>` — read
 `manifest.json`'s `arms.control.baseline`, don't re-derive it), date, one-word verdict (test-won /
 control-won / wash / contaminated), subjective score, single most important delta, relative path to
 report.md.
 
-## 6. Close the loop
+## 7. Close the loop
 
 Tell the user the top recommendation and remind: apply fixes to the plugin-under-test in ITS OWN
 repo — which, unlike before, is very likely the SAME repo this main session is already CD'd into;

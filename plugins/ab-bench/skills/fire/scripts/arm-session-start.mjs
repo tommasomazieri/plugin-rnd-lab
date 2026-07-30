@@ -24,6 +24,17 @@
  *          what dod-lite's Stop hook and /ab-bench:analyze expect, but it's cosmetic now —
  *          no gate hook exists anymore for it to neutralize.
  *
+ *   3. TURN COUNTER INIT — arms the per-session stop counter at 0 (see turn-counter.mjs),
+ *      so /ab-bench:fire can prove BOTH arms are counting before it hands the run over,
+ *      instead of discovering at analyze time that one arm never produced a turn count.
+ *
+ * Runs for real arm sessions only: dod-lite's prompt-tier checks spawn `claude -p`
+ * subprocesses inside the arm workspace, which inherit this settings.json and fire this
+ * hook. Linking them used to append them to arms.<arm>.sessions — run-001's test arm
+ * accumulated 23 "sessions", 15 of them checkers, and compare-runs.mjs analyzes the LAST
+ * startup segment, i.e. a 13-line checker transcript instead of the arm's actual work.
+ * DOD_LITE_CHECKER=1 in the environment is the documented marker for those subprocesses.
+ *
  * Deliberately writes NOTHING to stdout: any injected context would have to be
  * byte-identical across arms to preserve parity, and identifying the arm to the
  * agent would contaminate the experiment. Always exits 0 (fail-open): a broken
@@ -33,6 +44,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { initCounter, isCheckerSubprocess } from './turn-counter.mjs';
 
 function parseArgs(argv) {
   const args = {};
@@ -157,7 +169,7 @@ function main() {
   const manifestPath = args.manifest;
   const arm = args.arm;
   const dodDir = args.dod;
-  const runDir = manifestPath ? path.dirname(manifestPath) : null;
+  const runDir = args.run || (manifestPath ? path.dirname(manifestPath) : null);
   const launchDir = runDir ? path.join(runDir, '.launch') : path.resolve('.launch');
 
   let input = {};
@@ -169,6 +181,13 @@ function main() {
 
   const sessionId = input.session_id || null;
   const source = input.source || 'unknown';
+
+  // A dod-lite prompt-checker subprocess is not an arm session: no manifest entry, no
+  // .dod registration, no turn counter. Logged so it stays visible, not silent.
+  if (isCheckerSubprocess()) {
+    log(launchDir, `skipped ${arm}: session ${sessionId} is a dod-lite checker subprocess (DOD_LITE_CHECKER=1)`);
+    process.exit(0);
+  }
 
   try {
     if (!manifestPath || !arm) throw new Error('missing --manifest or --arm');
@@ -184,6 +203,12 @@ function main() {
     if (source === 'startup' || source === 'clear') {
       entry.dod = registerDod(dodDir, runDir, arm, sessionId, launchDir);
     }
+
+    // Arm the counter for EVERY source (resume/compact included): a resumed arm session
+    // keeps its session id, but a compacted one may not, and an unarmed session is
+    // exactly the state that produced a footer reading turns off the raw JSONL.
+    const counter = initCounter({ runDir, arm, sessionId });
+    log(launchDir, `turns: counter ${counter.already ? 'already armed' : 'armed'} for ${arm}/${sessionId} at ${counter.turns ?? 0}`);
 
     updateManifest(manifestPath, arm, entry);
     log(launchDir, `linked ${arm}: session ${sessionId} (source=${source})`);

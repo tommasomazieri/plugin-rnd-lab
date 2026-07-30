@@ -41,18 +41,31 @@ shared path-resolution helpers every skill/script uses.
                                           ---
                                           type: prompt        # or: human
                                           description: "one line"
-                                          model: haiku          # prompt only
+                                          model: claude-haiku-4-5-20251001   # prompt only, FULL id —
+                                                                # 'haiku' is not a CLI alias and
+                                                                # silently resolves to Sonnet
                                           ---
                                           <grading question (prompt) or question-for-user (human)>
   sessions/
     <session_id>.json   {
       session_id, created_at, planning_invoked, session_goal,
       checks: [ "<id>", ... ],
-      state: { "<id>": { tier, last_result: "pending"|"pass"|"fail"|"waived", last_output, last_checked_at } },
+      state: { "<id>": { tier, last_result: "pending"|"pass"|"fail"|"waived"|"error", last_output, last_checked_at } },
       history: [ { at, results: [ { check, result } ] } ]
     }
-  config.json            optional: { "runners": { ".ext": "command" } }
+  config.json            optional: {
+                           "runners":          { ".ext": "command" },
+                           "prompt_tier_gate": true,      // false = grade prompt checks even when a script check is red
+                           "hook_budget_ms":   270000,    // hook self-terminates here so its writes always land
+                           "prompt_timeout_ms": 180000    // per prompt-checker subprocess
+                         }
 ```
+
+`error` ≠ `fail`. `fail` is a grader verdict; `error` means the check could not be evaluated at all
+(checker subprocess timed out, crashed, returned no structured verdict, or the hook ran out of
+budget). **`error` never blocks the arm** — a dod-lite defect must not change what an arm does, or it
+stops being an A/B result and becomes a harness artifact — but it is recorded so `/ab-bench:analyze`
+can flag the dimension as ungraded. `pending` (tier never ran) reads the same way.
 
 `planning_invoked` is written `true` by `arm-session-start.mjs` for schema-shape consistency with
 what `/ab-bench:analyze` expects, but it is purely cosmetic now — dod-lite ships no gate hook that
@@ -178,6 +191,43 @@ that ever writes `checks[]`/`session_goal`/the initial scaffold. dod-lite's `Sto
 updates `state{}`/`history[]` on top of what's already there. Registration costs ZERO agent tokens
 in either arm (pure hook work), and neither arm's available-skill listing shows any DoD-design
 capability — dod-lite ships none.
+
+### Prompt tier execution budget
+
+The prompt tier runs its checkers **in parallel** (4 at a time) and dod-lite persists every result to
+the session file **the moment it lands**, not in one write at the end. Both exist because consultant
+run-002 lost an entire prompt tier: four checkers ran sequentially at 120 s each against a 300 s
+`Stop`-hook timeout, Claude Code killed the hook mid-tier, and the single end-of-run `writeSession()`
+never executed — the session file still read `last_checked_at: null` for all four prompt checks while
+`.launch/hooks.log` showed three checker subprocesses had actually spawned. The hook now stops itself
+at `hook_budget_ms` (270 s, under the 600 s hook timeout) so its writes always land, and any check it
+could not reach is recorded `error` rather than silently left `pending`.
+
+### Checker subprocesses are not arm sessions
+
+A prompt-tier check runs `claude -p` **inside the arm workspace**, so that subprocess inherits
+`<workspace>/.claude/settings.json` and fires ab-bench's own SessionStart and Stop hooks. dod-lite
+marks those subprocesses with `DOD_LITE_CHECKER=1` (its own recursion guard uses the same marker),
+and both ab-bench arm hooks bail on it: no manifest entry, no `.dod` registration, no turn count.
+Without that guard the manifest fills with checker sessions — consultant run-001's test arm logged
+23 "sessions", most of them checkers — and since `compare-runs.mjs` analyzes the LAST session
+segment, the arm's real work gets replaced by a 13-line checker transcript.
+
+## Turn counting (`.launch/turns/`)
+
+Each arm workspace also gets a `Stop` hook, `arm-turn-count.mjs`, writing
+`runs/run-NNN/.launch/turns/<session_id>.json`: `turns` (stops where `stop_hook_active` was false —
+one real user-turn-to-final-response cycle), `stops_total`, `blocked_continuations` (stops dod-lite
+refused because checks were failing). The same `turns` value is mirrored, as an absolute write, into
+`~/.claude/turn-counts/<session_id>.count` — the path a Claude Code statusline conventionally reads —
+so the live footer and the final analysis cannot disagree.
+
+ab-bench counts its own stop signals rather than trusting an operator's global counter hook: measured
+across three fired runs, arm sessions with 300–620 transcript lines had either no count file or one
+frozen at 1, which left footers deriving turns from raw JSONL (one entry per tool-call round trip, so
+"135 turns" against another arm's "1"). `/ab-bench:fire` will not hand a run over until
+`verify-launch.mjs` shows both arms linked AND counting; `compare-runs.mjs` raises a parity flag and
+marks `turn_counts.note` INCOMPLETE if a counter is ever missing at analyze time.
 
 ## What `/ab-bench:plan` must actually do
 

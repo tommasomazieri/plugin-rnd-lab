@@ -6,12 +6,28 @@
 // subprocess or interrupts the user with a HITL question for nothing:
 //   1. script  — always run, every turn (a passing check last turn can regress
 //                this turn), local subprocess, exit code is the verdict.
-//   2. prompt  — spawns a headless `claude -p` subprocess under
+//   2. prompt  — spawns headless `claude -p` subprocesses under
 //                --permission-mode plan (generic read-only guarantee, works for
-//                project-specific MCP tools too, not just builtins).
+//                project-specific MCP tools too, not just builtins). Run in
+//                parallel: sequential runs blew the Stop-hook timeout budget.
 //   3. human   — needs a live user; the hook can't ask directly, so it blocks
 //                with explicit instructions for Claude to run AskUserQuestion
 //                and persist the answer itself.
+//
+// The gate can be turned off per-project with `"prompt_tier_gate": false` in
+// .dod/config.json — an A/B harness wants every quality dimension graded at the
+// final state even when a script check is red, and pays for it knowingly.
+//
+// Two invariants exist because run-002 lost an entire prompt tier to a hook kill:
+//   - RESULTS ARE PERSISTED AS THEY LAND, not in one write at the end. A hook
+//     killed at its timeout must still leave behind everything it did finish.
+//   - THE HOOK SELF-TERMINATES ON ITS OWN BUDGET (HOOK_BUDGET_MS) before Claude
+//     Code's timeout can kill it, so the final write always happens.
+//
+// Infrastructure failures (spawn error, subprocess timeout, unparseable verdict,
+// exhausted budget) record `error`, NOT `fail`, and never block. A checker bug
+// must not change what an arm does — that would contaminate the experiment —
+// but it must stay visible in the session file for /ab-bench:analyze to flag.
 //
 // No custom stall/cooldown counter: Claude Code's native cap (stops issuing
 // further Stop blocks after 8 consecutive ones) is the safety net.
@@ -27,6 +43,7 @@ import {
   writeSession,
   sessionFilePath,
   checksDir,
+  loadConfig,
   loadRunners,
   truncate,
   runFailOpen,
@@ -34,7 +51,22 @@ import {
 } from './lib.mjs';
 
 const SCRIPT_TIMEOUT_MS = 30_000;
-const PROMPT_TIMEOUT_MS = 120_000;
+const PROMPT_TIMEOUT_MS = 180_000;
+
+// How many prompt checkers run at once. Wall time for the tier is now roughly
+// one checker, not the sum of all of them.
+const PROMPT_CONCURRENCY = 4;
+
+// Self-imposed wall-clock ceiling for the whole hook. Must stay under the
+// `timeout` in hooks.json (600s) AND under any lower value Claude Code might
+// clamp that to, because everything after the deadline is a lost result.
+const HOOK_BUDGET_MS = 270_000;
+
+// The default was 'haiku', which is NOT a recognised CLI alias (the CLI documents
+// 'fable', 'opus', 'sonnet'). It does not error — it silently resolves to Sonnet,
+// measured at $0.24/check vs $0.058 for real Haiku. A check's own `model:`
+// frontmatter still wins; only the fallback is pinned to a full model id.
+const CHECKER_MODEL = 'claude-haiku-4-5-20251001';
 
 const VERDICT_SCHEMA = {
   type: 'object',
@@ -51,6 +83,19 @@ function systemPromptFile() {
   }
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.join(here, '..', 'resources', 'prompt-checker-system.md');
+}
+
+// Inlined, not passed as a path: `--append-system-prompt-file` is not a real CLI
+// flag. The CLI accepts unknown options silently, so the grader system prompt was
+// being dropped on the floor with no error — checkers ran with stock instructions.
+async function loadSystemPrompt() {
+  const file = systemPromptFile();
+  try {
+    return (await fs.readFile(file, 'utf8')).trim();
+  } catch (err) {
+    console.error(`dod-lite: could not read checker system prompt ${file}: ${err.message}`);
+    return null;
+  }
 }
 
 function parseFrontmatter(raw) {
@@ -96,29 +141,49 @@ async function loadCheckDefs(cwd, ids) {
   return defs;
 }
 
+// child.kill() on Windows terminates only `claude` itself; the bash/python/node
+// processes it spawned survive, keep the inherited pipes open, and outlive the
+// hook. taskkill /T walks the tree.
+function killTree(child) {
+  if (typeof child.pid === 'number' && process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
+      return;
+    } catch { /* fall through to kill() */ }
+  }
+  try { child.kill(); } catch { /* already exited */ }
+}
+
 function runProcess(cmd, args, opts, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, { ...opts, shell: false });
+      // stdin explicitly ignored: left as the default inherited pipe, an
+      // unfed/unclosed fd can make a child-of-this-child (e.g. a bare
+      // interactive `python` a graded model runs via its own Bash tool)
+      // block on stdin until this process's timeoutMs kill, instead of
+      // hitting EOF immediately like a real closed stdin would.
+      child = spawn(cmd, args, { ...opts, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
-      resolve({ code: -1, stdout: '', stderr: err.message });
+      resolve({ code: -1, stdout: '', stderr: err.message, timedOut: false, spawnFailed: true });
       return;
     }
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
     const timer = setTimeout(() => {
-      try { child.kill(); } catch { /* already exited */ }
+      timedOut = true;
+      killTree(child);
     }, timeoutMs);
     child.stdout?.on('data', (d) => { stdout += d; });
     child.stderr?.on('data', (d) => { stderr += d; });
     child.on('error', (err) => {
       clearTimeout(timer);
-      resolve({ code: -1, stdout, stderr: `${stderr}\n${err.message}` });
+      resolve({ code: -1, stdout, stderr: `${stderr}\n${err.message}`, timedOut, spawnFailed: true });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr, timedOut, spawnFailed: false });
     });
   });
 }
@@ -132,13 +197,19 @@ async function runScriptCheck(cwd, runners, id, def) {
     return { id, tier: 'script', result: 'fail', output: `No runner configured for extension "${def.ext}". Add one to .dod/config.json under "runners".` };
   }
   const [cmd, ...baseArgs] = runnerCmd.split(' ');
-  const { code, stdout, stderr } = await runProcess(cmd, [...baseArgs, def.full], { cwd }, SCRIPT_TIMEOUT_MS);
+  const { code, stdout, stderr, timedOut } = await runProcess(cmd, [...baseArgs, def.full], { cwd }, SCRIPT_TIMEOUT_MS);
   const output = [stdout, stderr].filter(Boolean).join('\n').trim() || `(exit code ${code}, no output)`;
+  if (timedOut) {
+    return { id, tier: 'script', result: 'error', output: `check script killed after ${Math.round(SCRIPT_TIMEOUT_MS / 1000)}s without exiting.\n${truncate(output, 500)}` };
+  }
   return { id, tier: 'script', result: code === 0 ? 'pass' : 'fail', output };
 }
 
-async function runPromptCheck(cwd, id, def) {
-  const model = def.meta.model || 'haiku';
+async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
+  if (timeoutMs <= 0) {
+    return { id, tier: 'prompt', result: 'error', output: `hook time budget (${Math.round(budgetMs / 1000)}s) exhausted before this check could start — it was not graded.` };
+  }
+  const model = def.meta.model || CHECKER_MODEL;
   const promptText = [
     `DoD check "${id}"${def.meta.description ? ` — ${def.meta.description}` : ''}`,
     '',
@@ -154,24 +225,72 @@ async function runPromptCheck(cwd, id, def) {
     '--model', model,
     '--output-format', 'json',
     '--json-schema', JSON.stringify(VERDICT_SCHEMA),
-    '--append-system-prompt-file', systemPromptFile(),
   ];
-  const env = { ...process.env, DOD_LITE_CHECKER: '1' };
-  const { code, stdout, stderr } = await runProcess('claude', args, { cwd, env }, PROMPT_TIMEOUT_MS);
+  if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
 
+  const env = { ...process.env, DOD_LITE_CHECKER: '1' };
+  const { code, stdout, stderr, timedOut, spawnFailed } = await runProcess('claude', args, { cwd, env }, timeoutMs);
+
+  if (timedOut) {
+    return { id, tier: 'prompt', result: 'error', output: `checker subprocess killed after ${Math.round(timeoutMs / 1000)}s without returning a verdict.` };
+  }
+  if (spawnFailed) {
+    return { id, tier: 'prompt', result: 'error', output: `could not spawn checker subprocess: ${truncate(stderr.trim(), 500)}` };
+  }
   if (code !== 0) {
-    return { id, tier: 'prompt', result: 'fail', output: `checker subprocess exited ${code}: ${truncate((stderr || stdout).trim(), 500)}` };
+    return { id, tier: 'prompt', result: 'error', output: `checker subprocess exited ${code}: ${truncate((stderr || stdout).trim(), 500)}` };
   }
+  let parsed;
   try {
-    const parsed = JSON.parse(stdout);
-    const verdict = parsed.structured_output;
-    if (!verdict || typeof verdict.pass !== 'boolean') {
-      return { id, tier: 'prompt', result: 'fail', output: 'checker returned no structured verdict (inconclusive counts as fail).' };
-    }
-    return { id, tier: 'prompt', result: verdict.pass ? 'pass' : 'fail', output: verdict.reason || '' };
+    parsed = JSON.parse(stdout);
   } catch (err) {
-    return { id, tier: 'prompt', result: 'fail', output: `could not parse checker output: ${err.message}` };
+    return { id, tier: 'prompt', result: 'error', output: `could not parse checker output: ${err.message}` };
   }
+  const verdict = parsed.structured_output;
+  if (!verdict || typeof verdict.pass !== 'boolean') {
+    return { id, tier: 'prompt', result: 'error', output: 'checker returned no structured verdict — nothing was graded.' };
+  }
+  return { id, tier: 'prompt', result: verdict.pass ? 'pass' : 'fail', output: verdict.reason || '' };
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  const queue = [...items];
+  const lanes = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) {
+      await worker(queue.shift());
+    }
+  });
+  await Promise.all(lanes);
+}
+
+// Writes are serialised through one promise chain so parallel checkers finishing
+// at the same moment can't interleave two writeSession() calls on one object.
+function makePersister(cwd, sessionId, session) {
+  let chain = Promise.resolve();
+  const flushOne = () => {
+    chain = chain
+      .then(() => writeSession(cwd, sessionId, session))
+      .catch((err) => { console.error(`dod-lite: session write failed: ${err.message}`); });
+    return chain;
+  };
+  return {
+    record(result) {
+      session.state[result.id] = {
+        tier: result.tier,
+        last_result: result.result,
+        last_output: truncate(result.output),
+        last_checked_at: new Date().toISOString(),
+      };
+      return flushOne();
+    },
+    finalize(results) {
+      session.history.push({
+        at: new Date().toISOString(),
+        results: results.map((r) => ({ check: r.id, result: r.result })),
+      });
+      return flushOne();
+    },
+  };
 }
 
 function buildFailureReason(label, failures) {
@@ -192,6 +311,7 @@ function buildHumanPendingReason(pendingIds, defs, sessFile) {
 async function main() {
   if (isRecursionGuardActive()) return;
 
+  const startedAt = Date.now();
   const input = await readStdinJSON();
   const { session_id: sessionId, cwd } = input;
   if (!sessionId || !cwd) return;
@@ -199,50 +319,67 @@ async function main() {
   const session = await readSession(cwd, sessionId);
   if (!session || !Array.isArray(session.checks) || session.checks.length === 0) return;
 
+  const config = await loadConfig(cwd);
+  const budgetMs = Number.isFinite(config.hook_budget_ms) ? config.hook_budget_ms : HOOK_BUDGET_MS;
+  const promptTimeoutMs = Number.isFinite(config.prompt_timeout_ms) ? config.prompt_timeout_ms : PROMPT_TIMEOUT_MS;
+  const gateOnScripts = config.prompt_tier_gate !== false;
+  const deadline = startedAt + budgetMs;
+
   const defs = await loadCheckDefs(cwd, session.checks);
   const scriptIds = session.checks.filter((id) => defs[id].type === 'script' || defs[id].type === 'missing');
   const promptIds = session.checks.filter((id) => defs[id].type === 'prompt');
   const humanIds = session.checks.filter((id) => defs[id].type === 'human');
 
   const runners = await loadRunners(cwd);
+  const persister = makePersister(cwd, sessionId, session);
   const results = [];
-  let blockReason = null;
 
   for (const id of scriptIds) {
-    results.push(await runScriptCheck(cwd, runners, id, defs[id]));
+    const r = await runScriptCheck(cwd, runners, id, defs[id]);
+    results.push(r);
+    await persister.record(r);
   }
-  const scriptFailures = results.filter((r) => r.result === 'fail');
+  const scriptFailures = results.filter((r) => r.tier === 'script' && r.result === 'fail');
 
+  const promptTierRuns = promptIds.length > 0 && (!gateOnScripts || scriptFailures.length === 0);
+  if (promptTierRuns) {
+    const systemPrompt = await loadSystemPrompt();
+    await runWithConcurrency(promptIds, PROMPT_CONCURRENCY, async (id) => {
+      const remaining = deadline - Date.now();
+      const r = await runPromptCheck(cwd, id, defs[id], systemPrompt, Math.min(promptTimeoutMs, remaining), budgetMs);
+      results.push(r);
+      await persister.record(r);
+    });
+  }
+  const promptFailures = results.filter((r) => r.tier === 'prompt' && r.result === 'fail');
+
+  let blockReason = null;
   if (scriptFailures.length > 0) {
     blockReason = buildFailureReason('script', scriptFailures);
+  } else if (promptFailures.length > 0) {
+    blockReason = buildFailureReason('AI-graded', promptFailures);
   } else {
-    for (const id of promptIds) {
-      results.push(await runPromptCheck(cwd, id, defs[id]));
-    }
-    const promptFailures = results.filter((r) => r.tier === 'prompt' && r.result === 'fail');
-
-    if (promptFailures.length > 0) {
-      blockReason = buildFailureReason('AI-graded', promptFailures);
-    } else {
-      const pendingHuman = humanIds.filter((id) => {
-        const prior = session.state[id]?.last_result;
-        return prior !== 'pass' && prior !== 'waived';
-      });
-      if (pendingHuman.length > 0) {
-        blockReason = buildHumanPendingReason(pendingHuman, defs, sessionFilePath(cwd, sessionId));
-      }
+    const pendingHuman = humanIds.filter((id) => {
+      const prior = session.state[id]?.last_result;
+      return prior !== 'pass' && prior !== 'waived';
+    });
+    if (pendingHuman.length > 0) {
+      blockReason = buildHumanPendingReason(pendingHuman, defs, sessionFilePath(cwd, sessionId));
     }
   }
 
-  const now = new Date().toISOString();
-  for (const r of results) {
-    session.state[r.id] = { tier: r.tier, last_result: r.result, last_output: truncate(r.output), last_checked_at: now };
-  }
-  session.history.push({ at: now, results: results.map((r) => ({ check: r.id, result: r.result })) });
-  await writeSession(cwd, sessionId, session);
+  await persister.finalize(results);
+
+  // Never blocks — an infrastructure failure must not alter what the arm does.
+  const errors = results.filter((r) => r.result === 'error');
+  const errorNote = errors.length > 0
+    ? ` ${errors.length} check(s) could not be evaluated (recorded as "error", not blocking): ${errors.map((e) => e.id).join(', ')}.`
+    : '';
 
   if (blockReason) {
-    printJSON({ decision: 'block', reason: blockReason });
+    printJSON({ decision: 'block', reason: blockReason + (errorNote ? `\n\ndod-lite:${errorNote}` : '') });
+  } else if (errors.length > 0) {
+    printJSON({ systemMessage: `dod-lite: no failing Definition-of-Done checks.${errorNote}` });
   } else {
     printJSON({ systemMessage: 'dod-lite: all Definition-of-Done checks passed.' });
   }

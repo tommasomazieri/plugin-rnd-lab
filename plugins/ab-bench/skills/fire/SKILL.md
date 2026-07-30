@@ -4,7 +4,8 @@ description: >-
   detached terminals with everything-else-equal configs. User-invoke only (side effects:
   spawns terminals). Use after /ab-bench:plan. Runs scripts/launch-pair.mjs which clones
   seed/ into twin workspaces, composes per-arm --settings + --mcp-config, injects the
-  SessionStart linkage hook, and writes the run manifest. Run from the plugin-under-test's
+  SessionStart linkage hook and the Stop turn-counter hook, and writes the run manifest,
+  then gates handoff on scripts/verify-launch.mjs proving both arms are linked and counting. Run from the plugin-under-test's
   repo (or a subdirectory) — no argument needed, resolved from .ab-bench/state.json.
 argument-hint: ""
 disable-model-invocation: true
@@ -53,12 +54,31 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<configRoot>" "<testenvRoot>
 ```
 
 Two titled terminals open ("AB <experiment> control run-NNN" / "... test ..."). Each arm's
-SessionStart hook links its session id + transcript path into `manifest.json` and registers the
-DoD tracker. Verify linkage after ~30s: read `manifest.json` — both arms should show
-`status: "linked"` with a sessions entry. If an arm stays `launched`, check
-`runs/run-NNN/.launch/hooks.log`.
+SessionStart hook links its session id + transcript path into `manifest.json`, registers the
+DoD tracker, and **arms that arm's turn counter**.
 
-## 3. Hand off to the user — state the discipline
+## 3. Verify BOTH arms are measurable — before handing off
+
+Wait ~30s for both terminals to reach their first prompt, then:
+
+```
+node "${CLAUDE_SKILL_DIR}/scripts/verify-launch.mjs" "<runDir>"
+```
+
+Exit 0 means both arms are linked and counting. Exit 2 means at least one arm is not, and the
+output names which — **do not hand the run over in that state**. An arm with no counter cannot
+be compared at the end: `/ab-bench:analyze` has no real turn number for it, and the statusline
+footer falls back to counting assistant transcript entries, which is one per tool-call round
+trip, not one per turn (this is what produced a control reading "1 turn" against a test reading
+"135"). Re-run the verify a few times if a terminal is slow; if an arm stays uncounted, read
+`runs/run-NNN/.launch/hooks.log` and fix before working the run.
+
+Turn counts live in `runs/run-NNN/.launch/turns/<session_id>.json` — `turns` (stop signals that
+ended a user turn), `stops_total`, and `blocked_continuations` (stops dod-lite refused). The same
+number is mirrored into `~/.claude/turn-counts/<session_id>.count`, which is where the footer
+reads it, so the footer and the analysis agree by construction.
+
+## 4. Hand off to the user — state the discipline
 
 - Work BOTH sessions as you naturally would. Divergent prompts to rescue a stalled arm are fine
   and expected — they are measured as bias indicators, not forbidden.
