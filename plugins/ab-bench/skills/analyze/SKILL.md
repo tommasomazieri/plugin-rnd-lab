@@ -60,6 +60,26 @@ score, and tell the user what to fix before re-firing.
 Checks reported `pending` or `error` were never graded — say so as a harness defect, never as
 a quality result.
 
+`STALE DoD VERDICTS` does not end the analysis, but it **voids the scoreline**. It means a check
+was graded BEFORE that arm last changed the deliverable, so the verdict describes an artifact that
+no longer exists. Wait for the checks to settle and re-run step 2 before quoting any pass/fail
+count. In run-004 a snapshot taken while the prompt tier was still executing reported test 8/10
+when the true result was 10/10 — a "control won on quality" reading that contradicted the operator
+and had to be retracted mid-analysis. A stale `fail` is indistinguishable from a real one, which is
+why the flag exists rather than a judgement call.
+
+**Token attribution — read the breakdown under the table.** The summary is `combined`: each arm's
+own session PLUS every subagent it dispatched. Subagent sessions live outside the parent transcript
+(at `<projectDir>/<sessionId>/subagents/agent-*.jsonl`), so an arm that delegates heavily would
+otherwise look cheap for work it actually did. Two lines there need acting on:
+
+- `! N dispatch(es) with no transcript — UNMEASURED` — work happened that is still not counted.
+  Every cost figure for that arm is a floor, not a total; say so rather than quoting the delta flat.
+- `[harness, excluded]` — dod-lite's own prompt-checker sessions, which run with `cwd` set to the
+  arm workspace and therefore land in the same project directory. Grading overhead, not arm cost,
+  and excluded from both arms. Report it separately if the run's full footprint matters; never fold
+  it into a cost or quality verdict.
+
 ## 4. LLM contextualization layer
 
 Delegate to the **session-comparator** agent (plugin agent, `ab-bench:session-comparator`).

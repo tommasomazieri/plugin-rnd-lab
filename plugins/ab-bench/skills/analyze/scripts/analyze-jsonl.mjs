@@ -19,6 +19,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Tools that can change the deliverable. Bash is included deliberately: deck renders,
+// builds and generators all run through it, so excluding it would miss most real
+// mutations. A false positive here costs a warning; a false negative costs a wrong
+// scoreline.
+const MUTATING_TOOLS = new Set([
+  'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Task', 'Agent',
+]);
+
 export function analyzeFile(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split('\n').filter((l) => l.trim().length > 0);
@@ -37,6 +45,10 @@ export function analyzeFile(filePath) {
     tool_calls: {},
     tool_calls_total: 0,
     tool_errors: 0,
+    // Timestamp of the last tool call that could have changed the deliverable. A DoD
+    // verdict older than this graded an artifact that no longer exists — see the
+    // stale-verdict flag in compare-runs.mjs.
+    last_mutation_at: null,
     compactions: { boundaries: 0, compact_summaries: 0, summary_entries: 0 },
     user_bias: { real_user_turns: 0, user_chars_total: 0, user_turns: [] },
     duration: { start: null, end: null, seconds: null },
@@ -105,6 +117,9 @@ export function analyzeFile(filePath) {
           const name = block.name || 'unknown';
           m.tool_calls[name] = (m.tool_calls[name] || 0) + 1;
           m.tool_calls_total++;
+          if (MUTATING_TOOLS.has(name) && e.timestamp && (!m.last_mutation_at || e.timestamp > m.last_mutation_at)) {
+            m.last_mutation_at = e.timestamp;
+          }
         }
       }
       continue;
@@ -154,6 +169,153 @@ export function analyzeFile(filePath) {
   if (!m.has_reported_cost) m.cost_usd_reported = null;
   delete m.has_reported_cost;
   return m;
+}
+
+/**
+ * Subagent transcripts are NOT part of their parent's JSONL.
+ *
+ * A backgrounded `Task` dispatch gets its own session, stored at
+ *   <projectDir>/<parentSessionId>/subagents/agent-<agentId>.jsonl
+ * with a sibling `.meta.json` carrying {agentType, description, toolUseId, spawnDepth}.
+ * The parent transcript keeps only the tool_use block and a "launched successfully"
+ * tool_result — no `isSidechain` lines, no usage. So every token a subagent spends is
+ * invisible to analyzeFile(parent).
+ *
+ * Measured on ab-bench run-004: the test arm dispatched deck-critic twice, and those
+ * two sessions carried 400,963 cache-read and 134,103 cache-creation tokens over 28
+ * tool calls that the reported cost excluded entirely. A plugin that fans out more
+ * aggressively would be understated without limit, and nothing in the output would
+ * show it.
+ *
+ * Recurses: a subagent may itself dispatch (spawnDepth > 1).
+ */
+export function collectSubagentTranscripts(transcriptPath) {
+  const dir = path.dirname(transcriptPath);
+  const sessionId = path.basename(transcriptPath, '.jsonl');
+  const subDir = path.join(dir, sessionId, 'subagents');
+  const out = [];
+  if (!fs.existsSync(subDir)) return out;
+  for (const f of fs.readdirSync(subDir)) {
+    if (!f.endsWith('.jsonl')) continue;
+    const p = path.join(subDir, f);
+    let meta = {};
+    const metaPath = p.replace(/\.jsonl$/, '.meta.json');
+    if (fs.existsSync(metaPath)) {
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      } catch {
+        /* unreadable meta is not a reason to drop the tokens */
+      }
+    }
+    out.push({
+      path: p,
+      agent_id: f.replace(/^agent-/, '').replace(/\.jsonl$/, ''),
+      agent_type: meta.agentType || null,
+      description: meta.description || null,
+      tool_use_id: meta.toolUseId || null,
+      spawn_depth: meta.spawnDepth ?? null,
+    });
+    out.push(...collectSubagentTranscripts(p));
+  }
+  return out;
+}
+
+/** How many Task/Agent dispatches this transcript made. */
+export function countAgentDispatches(m) {
+  return (m.tool_calls?.Task || 0) + (m.tool_calls?.Agent || 0);
+}
+
+const ZERO = () => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0 });
+
+/**
+ * analyzeFile plus every subagent session it spawned, rolled into one total.
+ *
+ * `self` is the session's own usage, `subagents` the per-agent breakdown, and
+ * `total` what the work actually cost. `unaccounted_dispatches` is the alarm: Task
+ * calls whose transcript could not be located, i.e. work that happened and is still
+ * not being counted.
+ */
+export function analyzeWithSubagents(transcriptPath) {
+  const self = analyzeFile(transcriptPath);
+  const found = collectSubagentTranscripts(transcriptPath);
+  const subagents = found.map((s) => ({ ...s, metrics: analyzeFile(s.path) }));
+
+  const total = { tokens: ZERO(), tool_calls_total: self.tool_calls_total, assistant_messages: self.turns.assistant_messages };
+  for (const k of Object.keys(total.tokens)) total.tokens[k] = self.tokens[k];
+  for (const s of subagents) {
+    for (const k of Object.keys(total.tokens)) total.tokens[k] += s.metrics.tokens[k];
+    total.tool_calls_total += s.metrics.tool_calls_total;
+    total.assistant_messages += s.metrics.turns.assistant_messages;
+  }
+
+  const dispatches = countAgentDispatches(self);
+  const topLevel = subagents.filter((s) => (s.spawn_depth ?? 1) === 1).length;
+  return {
+    self,
+    subagents,
+    total,
+    dispatches,
+    unaccounted_dispatches: Math.max(0, dispatches - topLevel),
+  };
+}
+
+/**
+ * What kind of session a JSONL is, from its opening user message.
+ *
+ * dod-lite spawns its prompt checkers with `claude -p` and cwd = the arm workspace,
+ * so those checker sessions land in the SAME project directory as the arm's own
+ * transcript. In run-004 that was 16 extra files for test and 8 for control —
+ * 144,566 and 61,420 output tokens of grading, which is harness overhead and must
+ * never be folded into either arm's cost.
+ */
+export function peekSessionRole(filePath) {
+  let head;
+  try {
+    head = fs.readFileSync(filePath, 'utf8').split('\n', 60);
+  } catch {
+    return 'unknown';
+  }
+  for (const line of head) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e.type !== 'user' || !e.message) continue;
+    const c = e.message.content;
+    const text =
+      typeof c === 'string'
+        ? c
+        : (Array.isArray(c) ? c : []).filter((b) => b?.type === 'text').map((b) => b.text || '').join('\n');
+    if (!text) continue;
+    return /^\s*DoD check\s+"/.test(text) ? 'dod-checker' : 'session';
+  }
+  return 'unknown';
+}
+
+/**
+ * Every other session sitting in the same project directory, classified. Used to
+ * report harness overhead separately rather than silently ignoring or wrongly
+ * including it.
+ */
+export function collectPeerSessions(transcriptPath) {
+  const dir = path.dirname(transcriptPath);
+  const selfName = path.basename(transcriptPath);
+  const out = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const f of entries) {
+    if (!f.endsWith('.jsonl') || f === selfName) continue;
+    const p = path.join(dir, f);
+    out.push({ path: p, session_id: path.basename(f, '.jsonl'), role: peekSessionRole(p), metrics: analyzeFile(p) });
+  }
+  return out;
 }
 
 function main() {

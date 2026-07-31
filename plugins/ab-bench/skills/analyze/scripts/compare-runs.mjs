@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { analyzeFile } from './analyze-jsonl.mjs';
+import { analyzeFile, analyzeWithSubagents, collectPeerSessions } from './analyze-jsonl.mjs';
 import { digestFile, renderDigest } from './digest-transcript.mjs';
 import { readCounter, counterPath } from '../../fire/scripts/turn-counter.mjs';
 
@@ -51,6 +51,30 @@ function readJsonSafe(p) {
 // two-root split (only where testenvRoot itself lives moved; this function's logic didn't).
 function testenvRootFromRunDir(runDir) {
   return path.dirname(path.dirname(runDir));
+}
+
+/**
+ * Checks whose verdict predates the arm's last file-changing action.
+ *
+ * A verdict older than the artifact it grades is not a verdict. In run-004 this
+ * snapshotter sampled while the test arm's prompt tier was still executing and
+ * reported 8/10; four checks resolved up to 3.5 minutes later and all passed, so the
+ * true result was 10/10. That produced a "control won on quality" reading which
+ * contradicted the operator and had to be retracted mid-analysis. Silence here is
+ * what made it convincing — a stale `fail` is indistinguishable from a real one.
+ */
+function staleChecks(session, lastMutationAt) {
+  if (!session || !lastMutationAt) return [];
+  const out = [];
+  for (const id of session.checks || []) {
+    const at = session.state?.[id]?.last_checked_at;
+    if (!at) {
+      out.push({ id, checked_at: null, reason: 'never ran' });
+    } else if (at < lastMutationAt) {
+      out.push({ id, checked_at: at, reason: `graded at ${at}, deliverable changed at ${lastMutationAt}` });
+    }
+  }
+  return out;
 }
 
 function summarizeDodState(session) {
@@ -107,8 +131,53 @@ export function compareRun(runDir) {
     if (!last.transcript_path || !fs.existsSync(last.transcript_path)) {
       fail(`${arm} arm transcript not found: ${last.transcript_path}`);
     }
-    metrics[arm] = analyzeFile(last.transcript_path);
+    // The arm's own session PLUS every subagent it dispatched. A backgrounded Task
+    // gets its own transcript under <sessionId>/subagents/, so counting only the arm
+    // file credits the plugin with work it did not pay for. Everything done toward
+    // the goal is counted; nothing else is.
+    const rolled = analyzeWithSubagents(last.transcript_path);
+    metrics[arm] = rolled.self;
     metrics[arm].session_id = last.session_id;
+    metrics[arm].subagents = {
+      count: rolled.subagents.length,
+      dispatches_in_transcript: rolled.dispatches,
+      unaccounted_dispatches: rolled.unaccounted_dispatches,
+      tokens: rolled.total.tokens,
+      agents: rolled.subagents.map((s) => ({
+        agent_id: s.agent_id,
+        agent_type: s.agent_type,
+        description: s.description,
+        spawn_depth: s.spawn_depth,
+        tokens: s.metrics.tokens,
+        tool_calls_total: s.metrics.tool_calls_total,
+        duration_seconds: s.metrics.duration.seconds,
+      })),
+    };
+    // `combined` is what the arm actually cost. `metrics[arm].tokens` stays the
+    // arm session alone so the split remains inspectable.
+    metrics[arm].combined = {
+      tokens: rolled.total.tokens,
+      tool_calls_total: rolled.total.tool_calls_total,
+      assistant_messages: rolled.total.assistant_messages,
+    };
+    if (rolled.unaccounted_dispatches > 0) {
+      flags.push(
+        `${arm} arm: ${rolled.unaccounted_dispatches} agent dispatch(es) have NO locatable transcript — that work is real and still unmeasured. Every cost number for this arm is a floor, not a total.`,
+      );
+    }
+    // dod-lite prompt checkers run with cwd = the arm workspace, so their sessions
+    // land in the same project dir. Harness overhead, never arm cost — reported
+    // separately so it is neither hidden nor miscounted.
+    const peers = collectPeerSessions(last.transcript_path);
+    const checkers = peers.filter((p) => p.role === 'dod-checker');
+    const overhead = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
+    for (const p of checkers) for (const k of Object.keys(overhead)) overhead[k] += p.metrics.tokens[k];
+    metrics[arm].harness_overhead = {
+      note: 'dod-lite prompt-checker sessions sharing this workspace. NOT part of the arm\'s cost; listed so the run\'s full token footprint is visible.',
+      checker_sessions: checkers.length,
+      other_sessions: peers.length - checkers.length,
+      tokens: overhead,
+    };
     // Real turn count, emitted by the arm's own Stop hook (see fire/scripts/turn-counter.mjs).
     // `turns` = stop signals that ended a user turn; `stops_total` also counts the
     // continuations dod-lite forced by blocking a stop on failing checks.
@@ -169,6 +238,19 @@ export function compareRun(runDir) {
   for (const arm of ARMS) {
     dodSessions[arm] = readJsonSafe(path.join(testenvRoot, '.dod', 'sessions', `${metrics[arm].session_id}.json`));
   }
+  const dodStale = {};
+  for (const arm of ARMS) {
+    dodStale[arm] = staleChecks(dodSessions[arm], metrics[arm].last_mutation_at);
+    if (dodStale[arm].length > 0) {
+      flags.push(
+        `STALE DoD VERDICTS (${arm}): ${dodStale[arm].map((s) => s.id).join(', ')} — ` +
+          `graded before the arm's last change at ${metrics[arm].last_mutation_at}. The scoreline ` +
+          `below is PROVISIONAL: do not report it as a quality result, re-run compare-runs once ` +
+          `every check has settled.`,
+      );
+    }
+  }
+
   let dodNote = 'no runs/run-NNN/dod-checks.json — DoD tracking not used for this run';
   if (dodChecksDef) {
     const cIds = (dodChecksDef.checks?.control || []).map((x) => x.id).sort().join(',');
@@ -196,15 +278,26 @@ export function compareRun(runDir) {
           ? 'authoritative: counted by each arm\'s own Stop hook'
           : 'INCOMPLETE — at least one arm has no counter; do not compare turn totals across arms in this run',
     },
+    // Computed on `combined` — arm session plus its subagents — because that is what
+    // the work cost. Comparing arm sessions alone would credit an arm that delegates
+    // heavily with a saving it never made.
     deltas_test_vs_control: {
+      basis: 'combined (arm session + all subagent sessions); harness overhead excluded from both arms',
       turns_pct: pct(t.turn_counter?.turns, c.turn_counter?.turns),
-      input_tokens_pct: pct(t.tokens.input, c.tokens.input),
-      output_tokens_pct: pct(t.tokens.output, c.tokens.output),
-      cache_read_pct: pct(t.tokens.cache_read, c.tokens.cache_read),
-      assistant_messages_pct: pct(t.turns.assistant_messages, c.turns.assistant_messages),
-      tool_calls_pct: pct(t.tool_calls_total, c.tool_calls_total),
+      input_tokens_pct: pct(t.combined.tokens.input, c.combined.tokens.input),
+      output_tokens_pct: pct(t.combined.tokens.output, c.combined.tokens.output),
+      cache_read_pct: pct(t.combined.tokens.cache_read, c.combined.tokens.cache_read),
+      cache_creation_pct: pct(t.combined.tokens.cache_creation, c.combined.tokens.cache_creation),
+      assistant_messages_pct: pct(t.combined.assistant_messages, c.combined.assistant_messages),
+      tool_calls_pct: pct(t.combined.tool_calls_total, c.combined.tool_calls_total),
       tool_errors: t.tool_errors - c.tool_errors,
       duration_seconds_pct: pct(t.duration.seconds, c.duration.seconds),
+      arm_session_only: {
+        note: 'the same deltas excluding subagents — compare against the combined figures above to see how much of each arm ran in delegated sessions',
+        output_tokens_pct: pct(t.tokens.output, c.tokens.output),
+        cache_read_pct: pct(t.tokens.cache_read, c.tokens.cache_read),
+        tool_calls_pct: pct(t.tool_calls_total, c.tool_calls_total),
+      },
     },
     bias_indicators: {
       user_turns: { control: c.user_bias.real_user_turns, test: t.user_bias.real_user_turns },
@@ -230,6 +323,9 @@ export function compareRun(runDir) {
       definitions: dodChecksDef?.checks || null,
       control: summarizeDodState(dodSessions.control),
       test: summarizeDodState(dodSessions.test),
+      stale_verdicts: dodStale,
+      stale_note:
+        'A check listed here was graded BEFORE its arm last changed the deliverable, so it describes an artifact that no longer exists. Any scoreline including one is provisional.',
     },
   };
 
@@ -241,6 +337,9 @@ function summarize(m) {
   return {
     session_id: m.session_id,
     tokens: m.tokens,
+    combined: m.combined,
+    subagents: m.subagents,
+    harness_overhead: m.harness_overhead,
     cost_usd_reported: m.cost_usd_reported,
     turns: m.turn_counter?.turns ?? null,
     stops_total: m.turn_counter?.stops_total ?? null,
@@ -260,11 +359,12 @@ function printSummary(cmp) {
     ['metric', 'control', 'test', 'delta'],
     ['turns (Stop)', cmp.totals.control.turns ?? 'n/a', cmp.totals.test.turns ?? 'n/a', fmt(cmp.deltas_test_vs_control.turns_pct)],
     ['stops total', cmp.totals.control.stops_total ?? 'n/a', cmp.totals.test.stops_total ?? 'n/a', ''],
-    ['input tokens', cmp.totals.control.tokens.input, cmp.totals.test.tokens.input, fmt(cmp.deltas_test_vs_control.input_tokens_pct)],
-    ['output tokens', cmp.totals.control.tokens.output, cmp.totals.test.tokens.output, fmt(cmp.deltas_test_vs_control.output_tokens_pct)],
-    ['cache read', cmp.totals.control.tokens.cache_read, cmp.totals.test.tokens.cache_read, fmt(cmp.deltas_test_vs_control.cache_read_pct)],
-    ['assistant msgs', cmp.totals.control.assistant_messages, cmp.totals.test.assistant_messages, fmt(cmp.deltas_test_vs_control.assistant_messages_pct)],
-    ['tool calls', cmp.totals.control.tool_calls_total, cmp.totals.test.tool_calls_total, fmt(cmp.deltas_test_vs_control.tool_calls_pct)],
+    ['input tokens', cmp.totals.control.combined.tokens.input, cmp.totals.test.combined.tokens.input, fmt(cmp.deltas_test_vs_control.input_tokens_pct)],
+    ['output tokens', cmp.totals.control.combined.tokens.output, cmp.totals.test.combined.tokens.output, fmt(cmp.deltas_test_vs_control.output_tokens_pct)],
+    ['cache read', cmp.totals.control.combined.tokens.cache_read, cmp.totals.test.combined.tokens.cache_read, fmt(cmp.deltas_test_vs_control.cache_read_pct)],
+    ['cache creation', cmp.totals.control.combined.tokens.cache_creation, cmp.totals.test.combined.tokens.cache_creation, fmt(cmp.deltas_test_vs_control.cache_creation_pct)],
+    ['assistant msgs', cmp.totals.control.combined.assistant_messages, cmp.totals.test.combined.assistant_messages, fmt(cmp.deltas_test_vs_control.assistant_messages_pct)],
+    ['tool calls', cmp.totals.control.combined.tool_calls_total, cmp.totals.test.combined.tool_calls_total, fmt(cmp.deltas_test_vs_control.tool_calls_pct)],
     ['tool errors', cmp.totals.control.tool_errors, cmp.totals.test.tool_errors, String(cmp.deltas_test_vs_control.tool_errors)],
     ['duration (s)', cmp.totals.control.duration_seconds, cmp.totals.test.duration_seconds, fmt(cmp.deltas_test_vs_control.duration_seconds_pct)],
     ['user turns', cmp.bias_indicators.user_turns.control, cmp.bias_indicators.user_turns.test, String(cmp.bias_indicators.user_turn_asymmetry)],
@@ -280,11 +380,41 @@ function printSummary(cmp) {
     for (const f of cmp.parity_flags) console.log(`  ! ${f}`);
   }
 
+  console.log(`\nToken attribution (table above = ${cmp.deltas_test_vs_control.basis}):`);
+  for (const arm of ARMS) {
+    const s = cmp.totals[arm];
+    const sub = s.subagents || { count: 0, agents: [], dispatches_in_transcript: 0, unaccounted_dispatches: 0 };
+    console.log(
+      `  ${arm}: arm session ${s.tokens.output} out / ${s.tokens.cache_read} cache-read` +
+        `  +  ${sub.count} subagent session(s)`,
+    );
+    for (const a of sub.agents) {
+      console.log(
+        `      ${a.agent_type || 'agent'} (depth ${a.spawn_depth ?? '?'}): ` +
+          `${a.tokens.output} out / ${a.tokens.cache_read} cache-read / ${a.tool_calls_total} tools` +
+          `${a.description ? ` — ${a.description}` : ''}`,
+      );
+    }
+    if (sub.unaccounted_dispatches > 0) {
+      console.log(`      ! ${sub.unaccounted_dispatches} dispatch(es) with no transcript — UNMEASURED`);
+    }
+    const ho = s.harness_overhead;
+    if (ho && (ho.checker_sessions > 0 || ho.other_sessions > 0)) {
+      console.log(
+        `      [harness, excluded] ${ho.checker_sessions} dod-lite checker session(s)` +
+          `${ho.other_sessions ? ` + ${ho.other_sessions} other` : ''}: ` +
+          `${ho.tokens.output} out / ${ho.tokens.cache_read} cache-read`,
+      );
+    }
+  }
+
   console.log(`\nTurns: ${cmp.turn_counts.note}`);
   console.log(`\nDoD: ${cmp.dod_tracking.note}`);
   for (const arm of ['control', 'test']) {
     const s = cmp.dod_tracking[arm];
     console.log(s ? `  ${arm}: ${s.pass}/${s.total} pass, ${s.fail} fail, ${s.pending} pending, ${s.error} error, ${s.waived} waived` : `  ${arm}: no tracker found`);
+    const stale = cmp.dod_tracking.stale_verdicts?.[arm] || [];
+    for (const st of stale) console.log(`    ! STALE: ${st.id} — ${st.reason}`);
   }
   console.log('\nTranscript digests (READ BOTH before explaining any delta):');
   for (const arm of ['control', 'test']) {
