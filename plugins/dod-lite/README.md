@@ -27,23 +27,47 @@ able to discover, any DoD-*design* capability. All of that lives in ab-bench's o
 ## `.dod/` layout (in the shared experiment root, not the plugin)
 
 ```
-.dod/
+.dod/                      ← READ-ONLY to a graded session; never write here from an arm
   checks/                  ← authored by /ab-bench:plan, reusable across runs of the same experiment
     <id>.py|.mjs|.sh|.ps1|.rb|...   type: script — exit code is the verdict
+    <id>.meta.json                   optional sidecar: declared metadata for a script check
     <id>.md                          type: prompt or human, via frontmatter
   sessions/
     <session_id>.json      ← seeded by ab-bench's arm-session-start.mjs, updated by this plugin's Stop hook
-  config.json               ← optional: {"runners": {".ext": "command"}}
+  config.json               ← optional, see below
+.dod-answers/              ← WRITTEN BY the graded session: one file per answered human check
+  <id>.json                  {"result": "pass"|"fail"|"waived", "note": "...", "answered_at": "..."}
 ```
+
+An id must match exactly one file in `checks/`. `foo.py` alongside `foo.md` is the same check
+declared twice at two tiers; it is reported as an error, never resolved by readdir order.
 
 `.md` check frontmatter:
 ```yaml
 ---
 type: prompt        # or: human
 description: "one line"
-model: haiku          # prompt only, default haiku, override e.g. sonnet for nuanced calls
+seed_expectation: fail    # what this reports against an untouched seed. default fail
+model: claude-haiku-4-5-20251001   # prompt only. FULL model id — see below
+agents: '<json>'          # prompt only, optional: grade with specialist agents
+plugin_dirs: '[".../p"]'  # prompt only, optional: grade with a plugin's own QA tooling
 ---
 Body = the grading question (prompt) or the question to ask the user (human).
+```
+
+`model:` must be a full model id or a documented CLI alias (`fable`, `opus`, `sonnet`). A bare
+`haiku` is **not** an alias — `--model` accepts unknown values silently and falls back to a default,
+so it used to grade and bill as something nobody chose. That is now rejected outright.
+
+`config.json` (all optional):
+```json
+{
+  "runners":          { ".ext": "command" },
+  "prompt_tier_gate": true,
+  "script_timeout_ms": 30000,
+  "prompt_timeout_ms": 180000,
+  "hook_budget_ms":    270000
+}
 ```
 
 ## Check tiers
@@ -51,11 +75,22 @@ Body = the grading question (prompt) or the question to ask the user (human).
 | Tier | Runs | Cost | Verdict source |
 |---|---|---|---|
 | script | every `Stop`, always | free, local | exit code |
-| prompt | only if all script checks pass | $ + time (spawns a headless `claude -p` subprocess) | strict, conservative AI grader with read-only repo access |
-| human | only if script + prompt checks pass | interrupts the user | `AskUserQuestion`: Done / Not done (+notes) / Stop anyway |
+| prompt | all script checks pass, **or** `prompt_tier_gate: false` | $ + time (spawns a headless `claude -p` subprocess) | strict AI grader, read-only repo access, must cite `evidence` |
+| human | only if script + prompt checks pass | interrupts the user | `AskUserQuestion` → session writes `.dod-answers/<id>.json` |
 
 A failing tier skips the tiers after it that round — no point spending money or interrupting the
-arm session for nothing when a free check already says not-done.
+arm session for nothing when a free check already says not-done. **`prompt_tier_gate: false` turns
+that off for the prompt tier**, which is what an A/B harness wants: mid-run a script check is red
+almost by definition, so with the gate on the AI-graded tier silently never runs. ab-bench scaffolds
+every experiment with the gate off for exactly this reason.
+
+A prompt verdict carries `pass`, `reason`, `evidence` (cited `{path, line?, quote}` entries) and
+`confidence`. A pass with empty `evidence` is recorded as ungrounded — a grader that cites nothing
+did not look.
+
+Infrastructure failures (spawn error, timeout, unparseable verdict, exhausted budget) record
+`error`, never `fail`, and never block: a checker bug must not change what a graded session does.
+The prompt tier retries once before recording `error`.
 
 ## Plugin layout
 

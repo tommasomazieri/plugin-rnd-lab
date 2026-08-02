@@ -10,6 +10,15 @@ export const CHECKS_DIR = 'checks';
 export const SESSIONS_DIR = 'sessions';
 export const CONFIG_FILE = 'config.json';
 
+// Human-tier answers land HERE, not in .dod/. An ab-bench arm is denied
+// Edit/Write/MultiEdit on `/.dod/**` (launch-pair.mjs writes that deny rule so an arm
+// can never edit the checks it is graded against), and the session file lives inside
+// that same tree — so the old instruction to "edit the session file yourself" was
+// structurally impossible to obey and looped the arm into Claude Code's 8-stop cap.
+// A sibling directory keeps .dod immutable to arms AND leaves the arm's raw claim on
+// disk next to the harness's own record, so a forged verdict is detectable.
+export const ANSWERS_DIR = '.dod-answers';
+
 export const DEFAULT_RUNNERS = {
   '.mjs': 'node',
   '.js': 'node',
@@ -42,6 +51,39 @@ export function checksDir(cwd) {
 
 export function sessionFilePath(cwd, sessionId) {
   return path.join(cwd, DOD_DIR, SESSIONS_DIR, `${sessionId}.json`);
+}
+
+export function answersDir(cwd) {
+  return path.join(cwd, ANSWERS_DIR);
+}
+
+export function answerFilePath(cwd, id) {
+  return path.join(cwd, ANSWERS_DIR, `${id}.json`);
+}
+
+// Reads whatever the arm wrote into .dod-answers/. Absent dir, unreadable file, or
+// malformed JSON all degrade to "no answer for that check" rather than taking the hook
+// down — an arm that writes garbage should keep being asked, not crash the session.
+export async function readAnswers(cwd) {
+  const dir = answersDir(cwd);
+  const out = {};
+  let entries;
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return out;
+  }
+  for (const f of entries) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const raw = await fs.readFile(path.join(dir, f), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') out[f.slice(0, -'.json'.length)] = parsed;
+    } catch (err) {
+      console.error(`dod-lite: ignoring unreadable answer file ${f}: ${err.message}`);
+    }
+  }
+  return out;
 }
 
 export async function pathExists(p) {

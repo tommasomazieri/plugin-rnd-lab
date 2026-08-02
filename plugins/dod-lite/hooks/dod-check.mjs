@@ -11,8 +11,11 @@
 //                project-specific MCP tools too, not just builtins). Run in
 //                parallel: sequential runs blew the Stop-hook timeout budget.
 //   3. human   — needs a live user; the hook can't ask directly, so it blocks
-//                with explicit instructions for Claude to run AskUserQuestion
-//                and persist the answer itself.
+//                with explicit instructions for Claude to run AskUserQuestion and
+//                write the answer to .dod-answers/<id>.json, which this hook merges
+//                on the next stop. The answer goes there rather than into the session
+//                file because an ab-bench arm is denied writes under .dod/ — the old
+//                "edit the session file yourself" instruction was impossible to obey.
 //
 // The gate can be turned off per-project with `"prompt_tier_gate": false` in
 // .dod/config.json — an A/B harness wants every quality dimension graded at the
@@ -41,8 +44,9 @@ import {
   readStdinJSON,
   readSession,
   writeSession,
-  sessionFilePath,
   checksDir,
+  answerFilePath,
+  readAnswers,
   loadConfig,
   loadRunners,
   truncate,
@@ -66,15 +70,73 @@ const HOOK_BUDGET_MS = 270_000;
 // 'fable', 'opus', 'sonnet'). It does not error — it silently resolves to Sonnet,
 // measured at $0.24/check vs $0.058 for real Haiku. A check's own `model:`
 // frontmatter still wins; only the fallback is pinned to a full model id.
-const CHECKER_MODEL = 'claude-haiku-4-5-20251001';
+export const CHECKER_MODEL = 'claude-haiku-4-5-20251001';
 
-const VERDICT_SCHEMA = {
+// The CLI's documented short aliases. Anything else that isn't a full model id is
+// REJECTED rather than passed through, because `--model` accepts unknown values
+// silently and falls back to a default — which is how every check authored against the
+// old docs ("model: haiku") ended up billing as Sonnet with nothing in any log to say
+// so. Checked against a shape, not a version list, so this does not go stale.
+const CLI_MODEL_ALIASES = new Set(['fable', 'opus', 'sonnet']);
+
+// The grader binary, overridable via DOD_LITE_CLAUDE_CMD (a JSON array: executable
+// first, then any fixed leading args). Exists so the prompt tier can be exercised
+// against a stub — `spawn` runs with shell:false, which on Windows resolves only real
+// executables, so there is otherwise no way to substitute one — and so an operator can
+// pin a specific claude binary instead of whatever PATH happens to resolve.
+export function resolveCheckerCommand() {
+  const raw = process.env.DOD_LITE_CLAUDE_CMD;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { cmd: String(parsed[0]), prefixArgs: parsed.slice(1).map(String) };
+      }
+    } catch (err) {
+      console.error(`dod-lite: ignoring malformed DOD_LITE_CLAUDE_CMD: ${err.message}`);
+    }
+  }
+  return { cmd: 'claude', prefixArgs: [] };
+}
+
+export function validateCheckerModel(model) {
+  if (!model) return { ok: true };
+  if (CLI_MODEL_ALIASES.has(model)) return { ok: true };
+  if (/^claude-[a-z0-9][a-z0-9._-]*$/i.test(model)) return { ok: true };
+  return {
+    ok: false,
+    reason:
+      `"${model}" is neither a documented CLI alias (${[...CLI_MODEL_ALIASES].join(', ')}) ` +
+      'nor a full model id (claude-...). `--model` accepts unknown values silently and ' +
+      'resolves them to a default, so this check would be graded — and billed — by a model ' +
+      'nobody chose. Use a full model id.',
+  };
+}
+
+// v2. `evidence` and `confidence` are REQUIRED: a grader that returns a pass while
+// citing nothing did not look, and analyze needs to be able to say so. The citations
+// are also what makes a verdict auditable after the run, when the workspace is gone
+// and the reason string is all that survives.
+export const VERDICT_SCHEMA = {
   type: 'object',
   properties: {
     pass: { type: 'boolean' },
     reason: { type: 'string' },
+    evidence: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          line: { type: 'number' },
+          quote: { type: 'string' },
+        },
+        required: ['path', 'quote'],
+      },
+    },
+    confidence: { type: 'string', enum: ['high', 'low'] },
   },
-  required: ['pass', 'reason'],
+  required: ['pass', 'reason', 'evidence', 'confidence'],
 };
 
 function systemPromptFile() {
@@ -88,7 +150,7 @@ function systemPromptFile() {
 // Inlined, not passed as a path: `--append-system-prompt-file` is not a real CLI
 // flag. The CLI accepts unknown options silently, so the grader system prompt was
 // being dropped on the floor with no error — checkers ran with stock instructions.
-async function loadSystemPrompt() {
+export async function loadSystemPrompt() {
   const file = systemPromptFile();
   try {
     return (await fs.readFile(file, 'utf8')).trim();
@@ -98,7 +160,22 @@ async function loadSystemPrompt() {
   }
 }
 
-function parseFrontmatter(raw) {
+// Frontmatter is parsed line-by-line, so a list value arrives as a raw string. Accepts
+// a JSON array or a comma-separated list; anything empty yields no entries.
+export function parseList(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch { /* fall through to comma-splitting */ }
+  }
+  return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function parseFrontmatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { meta: {}, body: raw.trim() };
   const [, fmBlock, body] = m;
@@ -114,20 +191,45 @@ function parseFrontmatter(raw) {
   return { meta, body: body.trim() };
 }
 
-async function findCheckFile(cwd, id) {
+// A check id is the filename without extension, so `foo.py` and `foo.md` are the same
+// id declared twice as different tiers. That used to resolve to whichever one readdir
+// happened to return first — a silent coin-flip between a script and an AI grader.
+// Ambiguity is now surfaced, never guessed.
+export async function findCheckFile(cwd, id) {
   const dir = checksDir(cwd);
   const entries = await fs.readdir(dir).catch(() => []);
-  const match = entries.find((f) => path.parse(f).name === id);
-  if (!match) return null;
+  const matches = entries
+    .filter((f) => !f.endsWith('.meta.json'))
+    .filter((f) => path.parse(f).name === id);
+  if (matches.length === 0) return null;
+  if (matches.length > 1) return { ambiguous: matches.slice().sort() };
+  const match = matches[0];
   return { file: match, ext: path.extname(match), full: path.join(dir, match) };
 }
 
-async function loadCheckDefs(cwd, ids) {
+// Script checks carry their declared metadata in a `<id>.meta.json` sidecar, since an
+// executable has nowhere to put frontmatter. Prompt/human checks use frontmatter. Both
+// end up on `def.meta`, so every consumer reads one shape.
+async function loadScriptMeta(cwd, id) {
+  const p = path.join(checksDir(cwd), `${id}.meta.json`);
+  try {
+    const parsed = JSON.parse(await fs.readFile(p, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function loadCheckDefs(cwd, ids) {
   const defs = {};
   for (const id of ids) {
     const found = await findCheckFile(cwd, id);
     if (!found) {
-      defs[id] = { type: 'missing' };
+      defs[id] = { type: 'missing', meta: {} };
+      continue;
+    }
+    if (found.ambiguous) {
+      defs[id] = { type: 'ambiguous', files: found.ambiguous, meta: {} };
       continue;
     }
     if (found.ext === '.md') {
@@ -135,10 +237,19 @@ async function loadCheckDefs(cwd, ids) {
       const { meta, body } = parseFrontmatter(raw);
       defs[id] = { type: meta.type === 'human' ? 'human' : 'prompt', meta, body, full: found.full };
     } else {
-      defs[id] = { type: 'script', ext: found.ext, full: found.full };
+      defs[id] = { type: 'script', ext: found.ext, full: found.full, meta: await loadScriptMeta(cwd, id) };
     }
   }
   return defs;
+}
+
+// What this check is declared to report against a PRISTINE seed workspace. Default
+// `fail`: a check normally asserts work that has not happened yet. `pass` means it is a
+// regression guard — legitimate, but it can only contribute to an A/B by flipping, so
+// /ab-bench:plan makes the author justify it. The gate compares this against reality.
+export function seedExpectation(def) {
+  const raw = String(def?.meta?.seed_expectation ?? 'fail').trim().toLowerCase();
+  return raw === 'pass' ? 'pass' : 'fail';
 }
 
 // child.kill() on Windows terminates only `claude` itself; the bash/python/node
@@ -154,7 +265,7 @@ function killTree(child) {
   try { child.kill(); } catch { /* already exited */ }
 }
 
-function runProcess(cmd, args, opts, timeoutMs) {
+export function runProcess(cmd, args, opts, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -188,27 +299,42 @@ function runProcess(cmd, args, opts, timeoutMs) {
   });
 }
 
-async function runScriptCheck(cwd, runners, id, def) {
+export async function runScriptCheck(cwd, runners, id, def, timeoutMs = SCRIPT_TIMEOUT_MS) {
   if (def.type === 'missing') {
     return { id, tier: 'script', result: 'fail', output: 'Check file not found in .dod/checks/ (referenced in session checks[] but missing on disk).' };
+  }
+  if (def.type === 'ambiguous') {
+    return {
+      id,
+      tier: 'script',
+      result: 'error',
+      output:
+        `check id "${id}" matches more than one file in .dod/checks/: ${def.files.join(', ')}. ` +
+        'A check id is the filename without its extension, so these are the same check declared ' +
+        'twice at different tiers. Delete or rename all but one — this is not graded until you do.',
+    };
   }
   const runnerCmd = runners[def.ext];
   if (!runnerCmd) {
     return { id, tier: 'script', result: 'fail', output: `No runner configured for extension "${def.ext}". Add one to .dod/config.json under "runners".` };
   }
   const [cmd, ...baseArgs] = runnerCmd.split(' ');
-  const { code, stdout, stderr, timedOut } = await runProcess(cmd, [...baseArgs, def.full], { cwd }, SCRIPT_TIMEOUT_MS);
+  const { code, stdout, stderr, timedOut } = await runProcess(cmd, [...baseArgs, def.full], { cwd }, timeoutMs);
   const output = [stdout, stderr].filter(Boolean).join('\n').trim() || `(exit code ${code}, no output)`;
   if (timedOut) {
-    return { id, tier: 'script', result: 'error', output: `check script killed after ${Math.round(SCRIPT_TIMEOUT_MS / 1000)}s without exiting.\n${truncate(output, 500)}` };
+    return { id, tier: 'script', result: 'error', output: `check script killed after ${Math.round(timeoutMs / 1000)}s without exiting.\n${truncate(output, 500)}` };
   }
   return { id, tier: 'script', result: code === 0 ? 'pass' : 'fail', output };
 }
 
-async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
-  if (timeoutMs <= 0) {
-    return { id, tier: 'prompt', result: 'error', output: `hook time budget (${Math.round(budgetMs / 1000)}s) exhausted before this check could start — it was not graded.` };
-  }
+function formatEvidence(evidence) {
+  if (!Array.isArray(evidence) || evidence.length === 0) return '';
+  return `\n\nEvidence:\n${evidence
+    .map((e) => `- ${e.path}${e.line ? `:${e.line}` : ''} — ${truncate(String(e.quote ?? ''), 300)}`)
+    .join('\n')}`;
+}
+
+async function attemptPromptCheck(cwd, id, def, systemPrompt, timeoutMs) {
   const model = def.meta.model || CHECKER_MODEL;
   const promptText = [
     `DoD check "${id}"${def.meta.description ? ` — ${def.meta.description}` : ''}`,
@@ -216,7 +342,7 @@ async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
     'Grading question:',
     def.body,
     '',
-    `Investigate the repository at ${cwd} as needed (read-only tool access under plan mode) to determine whether this check currently passes. Verify — don't assume. Return your verdict via the required structured output.`,
+    `Investigate the repository at ${cwd} as needed (read-only tool access under plan mode) to determine whether this check currently passes. Verify — don't assume. Return your verdict via the required structured output, and cite the specific files and lines you actually read in \`evidence\`.`,
   ].join('\n');
 
   const args = [
@@ -227,9 +353,15 @@ async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
     '--json-schema', JSON.stringify(VERDICT_SCHEMA),
   ];
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
+  // Opt-in specialisation: a check may grade with the plugin-under-test's own QA tooling
+  // instead of as a naive reader. Recorded in the parity report, because a grader that
+  // has different capabilities on one arm than the other is an experimental variable.
+  if (def.meta.agents) args.push('--agents', def.meta.agents);
+  for (const dir of parseList(def.meta.plugin_dirs)) args.push('--plugin-dir', dir);
 
   const env = { ...process.env, DOD_LITE_CHECKER: '1' };
-  const { code, stdout, stderr, timedOut, spawnFailed } = await runProcess('claude', args, { cwd, env }, timeoutMs);
+  const { cmd, prefixArgs } = resolveCheckerCommand();
+  const { code, stdout, stderr, timedOut, spawnFailed } = await runProcess(cmd, [...prefixArgs, ...args], { cwd, env }, timeoutMs);
 
   if (timedOut) {
     return { id, tier: 'prompt', result: 'error', output: `checker subprocess killed after ${Math.round(timeoutMs / 1000)}s without returning a verdict.` };
@@ -250,10 +382,44 @@ async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
   if (!verdict || typeof verdict.pass !== 'boolean') {
     return { id, tier: 'prompt', result: 'error', output: 'checker returned no structured verdict — nothing was graded.' };
   }
-  return { id, tier: 'prompt', result: verdict.pass ? 'pass' : 'fail', output: verdict.reason || '' };
+  const evidence = Array.isArray(verdict.evidence) ? verdict.evidence : [];
+  return {
+    id,
+    tier: 'prompt',
+    result: verdict.pass ? 'pass' : 'fail',
+    output: (verdict.reason || '') + formatEvidence(evidence),
+    evidence,
+    confidence: verdict.confidence === 'low' ? 'low' : 'high',
+    // A pass citing nothing is not a pass anyone can check. Recorded here rather than
+    // downgraded, so /ab-bench:analyze decides what an ungrounded verdict is worth.
+    grounded: evidence.length > 0,
+    model: def.meta.model || CHECKER_MODEL,
+  };
 }
 
-async function runWithConcurrency(items, limit, worker) {
+export async function runPromptCheck(cwd, id, def, systemPrompt, timeoutMs, budgetMs) {
+  if (timeoutMs <= 0) {
+    return { id, tier: 'prompt', result: 'error', output: `hook time budget (${Math.round(budgetMs / 1000)}s) exhausted before this check could start — it was not graded.` };
+  }
+  const modelCheck = validateCheckerModel(def.meta.model);
+  if (!modelCheck.ok) {
+    return { id, tier: 'prompt', result: 'error', output: `invalid \`model:\` in check "${id}": ${modelCheck.reason}` };
+  }
+
+  const first = await attemptPromptCheck(cwd, id, def, systemPrompt, timeoutMs);
+  if (first.result !== 'error') return first;
+
+  // One retry. Grader failures are dominated by transient spawn/parse noise, and an
+  // `error` never blocks — so without a retry a flaky checker silently contributes
+  // nothing to the run and only shows up at analyze time as an ungraded dimension.
+  const remaining = Math.min(timeoutMs, budgetMs);
+  if (remaining <= 0) return first;
+  const second = await attemptPromptCheck(cwd, id, def, systemPrompt, remaining);
+  if (second.result !== 'error') return { ...second, retried: true };
+  return { ...second, retried: true, output: `${second.output}\n(first attempt also failed: ${truncate(first.output, 300)})` };
+}
+
+export async function runWithConcurrency(items, limit, worker) {
   const queue = [...items];
   const lanes = Array.from({ length: Math.min(limit, queue.length) }, async () => {
     while (queue.length > 0) {
@@ -265,7 +431,7 @@ async function runWithConcurrency(items, limit, worker) {
 
 // Writes are serialised through one promise chain so parallel checkers finishing
 // at the same moment can't interleave two writeSession() calls on one object.
-function makePersister(cwd, sessionId, session) {
+export function makePersister(cwd, sessionId, session) {
   let chain = Promise.resolve();
   const flushOne = () => {
     chain = chain
@@ -280,6 +446,11 @@ function makePersister(cwd, sessionId, session) {
         last_result: result.result,
         last_output: truncate(result.output),
         last_checked_at: new Date().toISOString(),
+        ...(result.evidence ? { evidence: result.evidence, grounded: result.grounded } : {}),
+        ...(result.confidence ? { confidence: result.confidence } : {}),
+        ...(result.model ? { grader_model: result.model } : {}),
+        ...(result.retried ? { retried: true } : {}),
+        ...(result.answer_source ? { answer_source: result.answer_source } : {}),
       };
       return flushOne();
     },
@@ -293,19 +464,27 @@ function makePersister(cwd, sessionId, session) {
   };
 }
 
-function buildFailureReason(label, failures) {
+export function buildFailureReason(label, failures) {
   const items = failures.map((f) => `- "${f.id}": ${truncate(f.output, 800)}`).join('\n');
   return `dod-lite: ${failures.length} ${label} DoD check(s) failing:\n${items}\n\nAddress these before stopping.`;
 }
 
-function buildHumanPendingReason(pendingIds, defs, sessFile) {
-  const items = pendingIds.map((id) => `- "${id}": ${defs[id]?.body || '(no question text found)'}`).join('\n');
+// Directs the arm to .dod-answers/, NOT to the session file. The session file lives
+// under .dod/, which every ab-bench arm is denied write access to — the old instruction
+// asked for something the harness structurally forbade, so a human check could never be
+// satisfied and the arm looped until Claude Code's 8-stop cap.
+export function buildHumanPendingReason(pendingIds, defs, cwd) {
+  const items = pendingIds
+    .map((id) => `- "${id}": ${defs[id]?.body || '(no question text found)'}\n    write to: ${answerFilePath(cwd, id)}`)
+    .join('\n');
   return `dod-lite: ${pendingIds.length} human-judgement DoD check(s) need your input before this turn can end:\n${items}\n\n` +
     'For EACH item above, ask the user via AskUserQuestion with exactly these three options: ' +
     '"Done", "Not done" (collect a free-text note on what is missing), "Stop anyway, finish later". ' +
-    `Then Edit ${sessFile} and set state["<id>"].last_result to "pass" (Done), "fail" (Not done — put their note in last_output), ` +
-    'or "waived" (Stop anyway), plus last_checked_at to the current ISO timestamp. ' +
-    'Do not mark a check pass without actually asking the user and recording their real answer.';
+    'Then Write the answer file shown for that check, containing exactly:\n' +
+    '  {"result": "pass"|"fail"|"waived", "note": "<their note, or empty>", "answered_at": "<ISO timestamp>"}\n' +
+    'where pass = Done, fail = Not done, waived = Stop anyway. Do NOT edit anything under .dod/ — ' +
+    'it is read-only to you by design, and writing the answer file is how your answer is recorded. ' +
+    'Do not write an answer file without actually asking the user and recording their real answer.';
 }
 
 async function main() {
@@ -322,11 +501,14 @@ async function main() {
   const config = await loadConfig(cwd);
   const budgetMs = Number.isFinite(config.hook_budget_ms) ? config.hook_budget_ms : HOOK_BUDGET_MS;
   const promptTimeoutMs = Number.isFinite(config.prompt_timeout_ms) ? config.prompt_timeout_ms : PROMPT_TIMEOUT_MS;
+  const scriptTimeoutMs = Number.isFinite(config.script_timeout_ms) ? config.script_timeout_ms : SCRIPT_TIMEOUT_MS;
   const gateOnScripts = config.prompt_tier_gate !== false;
   const deadline = startedAt + budgetMs;
 
   const defs = await loadCheckDefs(cwd, session.checks);
-  const scriptIds = session.checks.filter((id) => defs[id].type === 'script' || defs[id].type === 'missing');
+  const scriptIds = session.checks.filter(
+    (id) => defs[id].type === 'script' || defs[id].type === 'missing' || defs[id].type === 'ambiguous',
+  );
   const promptIds = session.checks.filter((id) => defs[id].type === 'prompt');
   const humanIds = session.checks.filter((id) => defs[id].type === 'human');
 
@@ -334,8 +516,24 @@ async function main() {
   const persister = makePersister(cwd, sessionId, session);
   const results = [];
 
+  // Human answers the arm wrote since the last stop, merged before anything else runs so
+  // a check answered this turn does not immediately block again.
+  const answers = await readAnswers(cwd);
+  for (const id of humanIds) {
+    const a = answers[id];
+    if (!a || !['pass', 'fail', 'waived'].includes(a.result)) continue;
+    if (session.state[id]?.last_result === a.result && session.state[id]?.answer_source === 'arm-reported') continue;
+    await persister.record({
+      id,
+      tier: 'human',
+      result: a.result,
+      output: typeof a.note === 'string' ? a.note : '',
+      answer_source: 'arm-reported',
+    });
+  }
+
   for (const id of scriptIds) {
-    const r = await runScriptCheck(cwd, runners, id, defs[id]);
+    const r = await runScriptCheck(cwd, runners, id, defs[id], scriptTimeoutMs);
     results.push(r);
     await persister.record(r);
   }
@@ -364,7 +562,7 @@ async function main() {
       return prior !== 'pass' && prior !== 'waived';
     });
     if (pendingHuman.length > 0) {
-      blockReason = buildHumanPendingReason(pendingHuman, defs, sessionFilePath(cwd, sessionId));
+      blockReason = buildHumanPendingReason(pendingHuman, defs, cwd);
     }
   }
 
@@ -385,4 +583,10 @@ async function main() {
   }
 }
 
-runFailOpen(main);
+export { main };
+
+// Only run when invoked as the hook. Without this guard the test suite could not import
+// a single function without the whole Stop-hook flow firing against process.stdin.
+const invokedDirectly =
+  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (invokedDirectly) runFailOpen(main);
