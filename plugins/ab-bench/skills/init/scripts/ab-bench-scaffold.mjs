@@ -32,6 +32,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureLab } from '../../../lib/lab.mjs';
 import {
   AB_BENCH_DIR,
   loadState,
@@ -74,10 +75,27 @@ function writeLedgerHeader(testenvDir, displayName, pluginRef) {
   fs.writeFileSync(p, content);
 }
 
+// dod-lite defaults prompt_tier_gate to TRUE (skip AI grading whenever a script check is
+// red), which is right for a normal project and wrong for an A/B harness: mid-run a
+// script check is red almost by definition, so the whole AI-graded tier silently never
+// ran. Every experiment gets the gate turned off explicitly at scaffold time — an A/B
+// wants every quality dimension graded at the final state and knowingly pays for it.
+function writeDodConfig(testenvDir) {
+  const p = path.join(testenvDir, '.dod', 'config.json');
+  if (fs.existsSync(p)) return; // never clobber an operator's tuning
+  fs.writeFileSync(p, `${JSON.stringify({ prompt_tier_gate: false }, null, 2)}\n`);
+}
+
 function scaffoldTestenv(testenvDir, displayName, pluginRef) {
   fs.mkdirSync(path.join(testenvDir, 'seed'), { recursive: true });
-  fs.mkdirSync(path.join(testenvDir, '.dod'), { recursive: true });
+  fs.mkdirSync(path.join(testenvDir, '.dod', 'checks'), { recursive: true });
+  fs.mkdirSync(path.join(testenvDir, '.dod', 'sessions'), { recursive: true });
   fs.mkdirSync(path.join(testenvDir, 'runs'), { recursive: true });
+  // lab/ is the run-over-run layer: objective, hypotheses, findings, regression points.
+  // Seeded empty here so /ab-bench:plan's ranking step has somewhere to read from on the
+  // very first run instead of reporting a missing file as if it were a problem.
+  ensureLab(testenvDir);
+  writeDodConfig(testenvDir);
   writeLedgerHeader(testenvDir, displayName, pluginRef);
 }
 

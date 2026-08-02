@@ -96,6 +96,79 @@ function summarizeDodState(session) {
   };
 }
 
+/**
+ * Human-answered DoD checks are HARNESS-INDUCED interruptions: the hook blocked and told
+ * the arm to ask. They are not the arm choosing to consult a human, so they must not
+ * count against the autonomy pillar — otherwise adding a taste check to a run would make
+ * both arms look less autonomous for reasons that have nothing to do with either.
+ */
+export function harnessHitl(dodSession) {
+  if (!dodSession) return 0;
+  return Object.values(dodSession.state || {}).filter(
+    (s) => s && s.tier === 'human' && s.answer_source === 'arm-reported',
+  ).length;
+}
+
+/**
+ * HITL the arm chose. `AskUserQuestion` calls plus any real user turn beyond the opening
+ * prompt — a user who had to step in unprompted is as much a failure of autonomy as one
+ * who was asked. Floored at zero: a forged or double-counted harness answer must not
+ * manufacture negative autonomy.
+ */
+export function electiveHitl(m, dodSession) {
+  const asks = m.tool_calls?.AskUserQuestion || 0;
+  const unpromptedTurns = Math.max(0, (m.user_bias?.real_user_turns || 0) - 1);
+  return Math.max(0, asks + unpromptedTurns - harnessHitl(dodSession));
+}
+
+/**
+ * The four countable pillars. `quality` is deliberately absent — it is scored against the
+ * mandate's versioned rubric into analysis/quality-<arm>.json, because a number derived
+ * from this run's own DoD checks would not be comparable to any other run's.
+ */
+export function pillarsFor(m, dodSession) {
+  const tok = m.combined?.tokens || m.tokens;
+  return {
+    input_tokens: (tok.input || 0) + (tok.cache_read || 0) + (tok.cache_creation || 0),
+    output_tokens: tok.output || 0,
+    turns: m.turn_counter?.turns ?? null,
+    autonomy: {
+      hitl_elective: electiveHitl(m, dodSession),
+      hitl_total: (m.tool_calls?.AskUserQuestion || 0) + Math.max(0, (m.user_bias?.real_user_turns || 0) - 1),
+      hitl_harness: harnessHitl(dodSession),
+      note: 'hitl_elective is the scored value: total minus interruptions the DoD harness caused.',
+    },
+    quality: null,
+  };
+}
+
+/** Resolved artifact identities per arm, tolerating schema-1 manifests. */
+export function pinsFromManifest(manifest) {
+  const out = {};
+  for (const arm of ['control', 'test']) {
+    const a = manifest.arms?.[arm];
+    if (Array.isArray(a?.artifacts)) {
+      out[arm] = a.artifacts.map((x) => ({
+        id: x.id,
+        deliver: x.deliver,
+        requested_ref: x.requested_ref,
+        kind: x.resolved?.kind,
+        sha: x.resolved?.sha,
+        hash: x.resolved?.hash,
+        dirty: Boolean(x.resolved?.dirty),
+      }));
+    } else if (a?.baseline) {
+      out[arm] = a.baseline.type === 'previous-version'
+        ? [{ id: 'plugin-under-test', deliver: 'plugin-dir', requested_ref: a.baseline.ref, kind: 'ref', dirty: false }]
+        : [];
+    } else {
+      out[arm] = [];
+    }
+  }
+  out.note = 'What each arm ran against. A `dirty: true` pin is replayable from its cached snapshot but is NOT reconstructible from git history alone.';
+  return out;
+}
+
 export function compareRun(runDir) {
   const manifestPath = path.join(runDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) fail(`no manifest.json in ${runDir} — run not fired yet`);
@@ -105,6 +178,7 @@ export function compareRun(runDir) {
 
   const metrics = {};
   const digests = {};
+  const rolledByArm = {};
   const flags = [];
 
   for (const arm of ARMS) {
@@ -136,6 +210,7 @@ export function compareRun(runDir) {
     // file credits the plugin with work it did not pay for. Everything done toward
     // the goal is counted; nothing else is.
     const rolled = analyzeWithSubagents(last.transcript_path);
+    rolledByArm[arm] = rolled;
     metrics[arm] = rolled.self;
     metrics[arm].session_id = last.session_id;
     metrics[arm].subagents = {
@@ -201,6 +276,36 @@ export function compareRun(runDir) {
     };
     for (const w of dig.warnings) flags.push(`${arm} arm: ${w}`);
 
+    // Subagent tokens were already rolled up; their BEHAVIOUR was not. If a subagent is
+    // part of the thing under test, a cost with no visible conduct is a blind spot in the
+    // exact place the experiment is aimed — so every subagent session gets the same
+    // bounded, line-anchored narrative the arm itself gets.
+    digests[arm].subagents = [];
+    for (const sub of metrics[arm].subagents?.agents || []) {
+      const subPath = (rolledByArm[arm]?.subagents || []).find((s) => s.agent_id === sub.agent_id)?.path;
+      if (!subPath || !fs.existsSync(subPath)) {
+        flags.push(`${arm} arm: subagent ${sub.agent_type || sub.agent_id} has tokens but no readable transcript — its conduct is unmeasured.`);
+        continue;
+      }
+      const subDig = digestFile(subPath, `${arm}/${sub.agent_type || 'agent'}`);
+      const subDigestPath = path.join(analysisDir, `digest-${arm}-sub-${sub.agent_id}.md`);
+      fs.writeFileSync(subDigestPath, renderDigest(subDig), 'utf8');
+      digests[arm].subagents.push({
+        path: subDigestPath,
+        agent_id: sub.agent_id,
+        agent_type: sub.agent_type,
+        description: sub.description,
+        spawn_depth: sub.spawn_depth,
+        jsonl_lines: subDig.jsonl_lines,
+        tokens: sub.tokens,
+      });
+    }
+    if (digests[arm].subagents.length > 0) {
+      flags.push(
+        `${arm} arm delegated to ${digests[arm].subagents.length} subagent session(s) — digests written to analysis/digest-${arm}-sub-*.md. Read them before attributing any delta: work that happened there is invisible in the arm's own transcript.`,
+      );
+    }
+
     fs.writeFileSync(path.join(analysisDir, `metrics-${arm}.json`), JSON.stringify(metrics[arm], null, 2));
   }
 
@@ -261,11 +366,30 @@ export function compareRun(runDir) {
   }
 
   const comparison = {
-    schema: 1,
+    schema: 2,
     experiment: manifest.experiment,
     run: manifest.run,
-    control_baseline: manifest.arms?.control?.baseline || { type: 'vanilla' },
+    // What each arm actually ran against, resolved and immutable. Schema-1 manifests
+    // carried only `arms.control.baseline`; that is folded in so old runs still read.
+    pins: pinsFromManifest(manifest),
     generated_at: new Date().toISOString(),
+    pillars: {
+      note:
+        'The five axes progress is tracked on. quality is scored separately against the mandate\'s ' +
+        'quality-rubric (analysis/quality-<arm>.json) and is NOT derivable from this file alone; ' +
+        'the other four are counted here. Lower is better on every axis except quality.',
+      control: pillarsFor(c, dodSessions.control),
+      test: pillarsFor(t, dodSessions.test),
+      deltas_test_vs_control: {
+        input_tokens_pct: pct(
+          t.combined.tokens.input + t.combined.tokens.cache_read + t.combined.tokens.cache_creation,
+          c.combined.tokens.input + c.combined.tokens.cache_read + c.combined.tokens.cache_creation,
+        ),
+        output_tokens_pct: pct(t.combined.tokens.output, c.combined.tokens.output),
+        turns_pct: pct(t.turn_counter?.turns, c.turn_counter?.turns),
+        autonomy_hitl_elective: electiveHitl(t, dodSessions.test) - electiveHitl(c, dodSessions.control),
+      },
+    },
     totals: {
       control: summarize(c),
       test: summarize(t),

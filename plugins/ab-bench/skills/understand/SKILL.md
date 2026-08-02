@@ -126,8 +126,46 @@ This file lives at `.ab-bench/<mandate-id>/mandate.md` in the plugin repo — ne
 requirement), and shared by every env under this same mandate. It is read only by
 main-session skills (`plan`, `analyze`), never by an arm session.
 
+## 3b. Write `quality-rubric.md` — turn "good" into something scoreable
+
+`mandate.md` says what good looks like in prose. Prose cannot be compared across runs, and
+"quality" is the pillar the whole programme is ultimately steering on — so the vague version
+has to be made concrete exactly once, here, and then held still.
+
+Derive the rubric from the mandate's **Definition of a good outcome** and **Known weak
+spots**. Write `.ab-bench/<mandate-id>/quality-rubric.md`:
+
+```markdown
+# <plugin> — quality rubric (rubric_version: v1)
+
+## <dimension name>   weight: 0.4
+evidence_sources: <what a grader must open to score this — files, outputs, artifacts>
+
+- 0 — <observable state, phrased so two people would agree it applies>
+- 1 — ...
+- 2 — ...
+- 3 — ...
+- 4 — <what excellent actually looks like, concretely>
+```
+
+Rules that make it usable:
+
+- **Anchors must be observable, not evaluative.** "Handles errors well" is unscoreable.
+  "Every failure path returns a message naming the file and the fix" is scoreable.
+- **Weights sum to 1.** If everything matters equally, the rubric isn't saying anything.
+- **3–6 dimensions.** More than that and nobody scores it consistently.
+- **Level 4 is the destination.** This is the answer to "what should good look like" —
+  if you can't write level 4 concretely, the mandate is still too vague; go back and
+  interview for it rather than writing filler.
+
+Bumping `rubric_version` later **forks the trajectory**: quality scores either side of the
+bump are on different scales and are never plotted as one curve. That is fine and expected
+as understanding improves — but say so when you do it, because it costs comparability with
+everything measured before.
+
 ## 4. Confirm
 
-Tell the user: `mandate.md written (<mandate-id>).` If this was mid-init, continue init's own
-closing message. If standalone, remind them: existing runs' task.md/DoD aren't retroactively
-changed — this shapes the NEXT `/ab-bench:plan`.
+Tell the user: `mandate.md + quality-rubric.md written (<mandate-id>).` If this was mid-init,
+continue init's own closing message. If standalone, remind them: existing runs' task.md/DoD
+aren't retroactively changed — this shapes the NEXT `/ab-bench:plan`. If you bumped
+`rubric_version`, say explicitly that past quality scores are no longer on the same scale.

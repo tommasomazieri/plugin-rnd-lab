@@ -80,23 +80,137 @@ otherwise look cheap for work it actually did. Two lines there need acting on:
   and excluded from both arms. Report it separately if the run's full footprint matters; never fold
   it into a cost or quality verdict.
 
+## 3b. Score quality against the rubric — the only cross-run quality number
+
+DoD checks are per-task, so their pass counts are meaningless next to another run's. The
+comparable number comes from `.ab-bench/mandate-N/quality-rubric.md` (written by
+`/ab-bench:understand`), which both arms are scored against every run.
+
+For EACH arm, score every rubric dimension 0–4 using its anchored descriptors, citing the
+artifacts named in that dimension's `evidence_sources`. Then show both to the user and get
+confirmation — the grader proposes, the human ratifies. Write
+`analysis/quality-<arm>.json`:
+
+```json
+{ "rubric_version": "<from the rubric file>", "weighted_total": 2.85,
+  "dimensions": [ { "name": "...", "score": 3, "weight": 0.4,
+                    "evidence": ["path:line ..."], "human_confirmed": true } ] }
+```
+
+If no rubric exists yet, say so and skip — do NOT invent a quality number from the DoD
+pass rate. A number that isn't comparable across runs is worse than no number, because it
+will be plotted anyway.
+
+Do this BEFORE step 4: the comparator reasons over all five pillars, and without the quality
+score it can only attribute four of them.
+
 ## 4. LLM contextualization layer
 
 Delegate to the **session-comparator** agent (plugin agent, `ab-bench:session-comparator`).
-Its task prompt must contain: absolute paths to **both `analysis/digest-<arm>.md` files**,
-comparison.json, both metrics files, both raw transcripts (from manifest.json — last session
-segment per arm; the agent uses these only to expand specific `L<n>` anchors), both
-`testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent),
-`runs/run-NNN/dod-checks.json` path (note if absent), `configRoot/env.json` path, `mandateFile`
-path (note if absent — legacy experiment; read `manifest.json`'s `mandate`/`env` fields to
-confirm you're pointing at the right one if it's ambiguous), and the verbatim human verdict.
+Its task prompt must contain absolute paths to:
+
+- **both `analysis/digest-<arm>.md` files**
+- **every `analysis/digest-<arm>-sub-*.md`** — one per subagent session either arm dispatched.
+  List them explicitly with their `agent_type` from `comparison.json` → `digests.<arm>.subagents[]`;
+  don't leave the agent to discover them. If either arm dispatched none, say so, so an empty
+  Evidence-log line reads as a fact rather than a skipped step.
+- `comparison.json` and both metrics files
+- both `analysis/quality-<arm>.json` from step 3b (note if the rubric didn't exist)
+- both raw transcripts (from manifest.json — last session segment per arm; the agent uses
+  these only to expand specific `L<n>` anchors)
+- both `testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent) and the
+  `workspace/.dod-answers/` folder for each arm if any human check was answered
+- `runs/run-NNN/dod-checks.json` path (note if absent), `configRoot/env.json` path
+- `mandateFile` path (note if absent — legacy experiment; read `manifest.json`'s
+  `mandate`/`env` fields to confirm you're pointing at the right one if it's ambiguous)
+- `testenvRoot/lab/objective.json` — the declared priority pillar and its guards
+- **the hypothesis this run was fired to test**, verbatim: its id, statement and predicted
+  mechanism from `lab/hypotheses.json`. If the run tested none, say that explicitly rather
+  than omitting it, or the agent will assume you forgot.
+- the verbatim human verdict
+
 Nothing else — the agent knows its method and output format.
 
-**Reject the agent's output and re-delegate once** if it comes back without an `## Evidence
-log` section showing both digests read in full, or if any `[OBJECTIVE]` finding carries no
-`L<n>` / `metric:` citation. An unanchored causal claim is the exact failure this pipeline
-exists to prevent — do not paste one into the report. If the second attempt is still
-unanchored, put the findings in the report under a heading that says they are unverified.
+**Reject the agent's output and re-delegate once** if any of these hold. Each is a failure the
+rest of the pipeline cannot recover from:
+
+- no `## Evidence log` showing both arm digests AND every subagent digest read in full
+- any `[OBJECTIVE]` finding with no `L<n>` / `metric:` citation
+- a `## What was compared` that names a cause when more than one artifact differed in `pins`
+- `## Candidate hypotheses` entries missing `PILLARS` / `MAGNITUDE` / `CONFIDENCE` / `COST`,
+  or naming a pillar outside the five — step 4c feeds these straight into `lab-cli.mjs add`
+  and a malformed one is dropped silently
+
+An unanchored causal claim is the exact failure this pipeline exists to prevent — do not paste
+one into the report. If the second attempt is still unanchored, put the findings in the report
+under a heading that says they are unverified.
+
+## 4c. Resolve the hypothesis this run was fired to test
+
+```bash
+node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" classify "<testenvRoot>" \
+    --deltas '{"quality":<Δ>,"input_tokens":<Δ>,"output_tokens":<Δ>,"turns":<Δ>,"autonomy":<Δ>}' \
+    [--contaminated]
+```
+
+Deltas are test-vs-control percentages: take the four countable ones straight from
+`comparison.json`'s `pillars.deltas_test_vs_control`, and quality from step 3b. Pass
+`--contaminated` if step 3 hit any stop condition — a run that cannot be trusted must
+resolve `inconclusive` rather than quietly confirming something.
+
+The classifier returns one of:
+
+| outcome | meaning |
+|---|---|
+| `confirmed` | the priority pillar moved the right way and every guard held |
+| `won-at-a-cost` | the priority moved, but another pillar regressed past its guard — a real result, and not a win |
+| `refuted` | the priority did not move as predicted |
+| `inconclusive` | contaminated, underpowered, or the priority pillar wasn't measured |
+
+Record it, and record what was learned:
+
+```bash
+node ".../lab-cli.mjs" resolve "<testenvRoot>" --id <H-NNN> --run run-NNN --outcome <o> --note "..."
+node ".../lab-cli.mjs" finding "<testenvRoot>" --text "<what is now known>" --run run-NNN --hypothesis <H-NNN>
+```
+
+Only write a finding you could defend from this run's artifacts alone. If the run suggested
+something you can't yet support, that is a new hypothesis — see 4d, not a finding.
+
+**The comparator's hypothesis reading can veto a `confirmed`.** If its `## Hypothesis
+evidence` section says the predicted number moved for a reason other than the predicted
+mechanism, do NOT record `confirmed`. Re-run `classify --contaminated`, resolve
+`inconclusive`, and put the comparator's sentence verbatim in the `--note`. The classifier
+sees only deltas; a delta that arrived by the wrong road is the one failure it cannot detect,
+and recording it as a confirmation puts a false result into the permanent record that every
+later run reasons from.
+
+## 4d. Bank the comparator's candidate hypotheses
+
+The comparator's `## Candidate hypotheses` section is already in the shape `lab-cli.mjs add`
+takes. Transcribe each one — do not paraphrase, do not re-derive, do not invent extras:
+
+```bash
+node ".../lab-cli.mjs" add "<testenvRoot>" --statement "<STATEMENT>" --pillars <PILLARS> \
+    --magnitude <MAGNITUDE> --confidence <CONFIDENCE> --cost <COST> \
+    --why "<BASIS, including its citation>" --run run-NNN
+```
+
+Drop any whose `BASIS` cites nothing, and say which you dropped. An unsupported hypothesis
+that enters the ledger gets ranked against real ones and can win on a fabricated magnitude —
+this is the one place where a plausible guess does lasting damage, because `/ab-bench:plan`
+will spend a whole run on whatever ranks first.
+
+Its `## Harness defects` section goes nowhere near the ledger. Those are ab-bench/dod-lite
+bugs — report them to the user in step 7 and leave the artifact's ledger clean.
+
+**If this was a regression run** (the frozen task in `lab/regressions/`), also record the
+absolute point — this is the only thing that ever becomes a curve:
+
+```bash
+node ".../lab-cli.mjs" regression "<testenvRoot>" --run run-NNN --rubric-version <v> \
+    --arms '{"control":{...},"test":{...}}'
+```
 
 ## 5. Write analysis/report.md
 
@@ -104,6 +218,22 @@ Structure:
 
 ```markdown
 # <experiment> — run-NNN analysis (<date>)
+
+## What was compared
+<the comparator's one-liner from `pins`: which artifacts differed, which were held constant.
+A reader six months from now cannot reconstruct this from anywhere else.>
+
+## Hypothesis
+<the id and statement this run was fired to test, the classifier's outcome, and its
+`why` string verbatim. If the comparator's mechanism reading forced a downgrade under 4c,
+say that here with its sentence quoted. If the run tested no pre-registered hypothesis, say
+exactly that — it means the result cannot feed the development record.>
+
+## Pillar scoreline
+<a 5-row table: pillar | control | test | delta | source. Countable four from
+`comparison.json`'s `pillars`, quality from `analysis/quality-<arm>.json`. Mark the priority
+pillar and any breached guard. Write "not scored" for quality if no rubric exists — never a
+number derived from anything else.>
 
 ## Human verdict (verbatim)
 > ...
@@ -113,29 +243,44 @@ Structure:
 
 ## Contextualized analysis
 <session-comparator output, unedited — its [OBJECTIVE]/[SUBJECTIVE]/[UNVERIFIED] tags and its
-Evidence log and Not-investigated sections must all survive verbatim. Do not tidy them away:
-what the analysis did NOT establish is part of the result.>
+Evidence log, Pillar attribution and Not-investigated sections must all survive verbatim. Do
+not tidy them away: what the analysis did NOT establish is part of the result.>
 
-## Next-iteration actions
-<the comparator's recommendations, reviewed: drop any you can refute from the metrics,
-mark the rest as TODO items targeting the plugin-under-test repo>
+## Hypotheses opened
+<the ids `lab-cli.mjs add` returned in 4d, one line each, plus any candidate you dropped and
+why. If none were opened on a run that produced findings, say why not.>
+
+## Harness defects
+<the comparator's Harness defects section, plus anything you hit yourself running this
+analysis. These target ab-bench/dod-lite, NOT the artifact under test. Empty is valid.>
 ```
 
-If the run hit a stop condition from step 3, the report is just: human verdict, the
-deterministic table, the parity flags, and a "What to fix before re-firing" list. No verdict,
-no score.
+If the run hit a stop condition from step 3, the report is just: what was compared, human
+verdict, the deterministic table, the parity flags, and a "What to fix before re-firing" list.
+No verdict, no score, no hypotheses opened.
 
 ## 6. Append the ledger row
 
-Add to `testenvRoot/ledger.md`: run, control baseline (`vanilla` or `previous-version@<ref>` — read
-`manifest.json`'s `arms.control.baseline`, don't re-derive it), date, one-word verdict (test-won /
-control-won / wash / contaminated), subjective score, single most important delta, relative path to
-report.md.
+Add to `testenvRoot/ledger.md`: run, the pins both arms ran against (read
+`comparison.json`'s `pins` — don't re-derive them; mark a `dirty: true` pin with `*`), date,
+one-word verdict (test-won / control-won / wash / contaminated), the hypothesis id and its
+outcome, subjective score, single most important delta, relative path to report.md.
+
+`ledger.md` stays a flat index of runs. The narrative lives in `lab/` and is assembled by
+`/ab-bench:paper` — never maintain the same fact in both.
 
 ## 7. Close the loop
 
-Tell the user the top recommendation and remind: apply fixes to the plugin-under-test in ITS OWN
-repo — which, unlike before, is very likely the SAME repo this main session is already CD'd into;
+Tell the user three things, in this order:
+
+1. **The top-ranked open hypothesis** — run `node ".../lab-cli.mjs" rank "<testenvRoot>"` after
+   4d rather than guessing which of the new ones wins. That is the actual answer to "what next".
+2. **Any harness defect** from the report's last section, separately and plainly. A broken
+   check or a mis-scoped deny rule silently distorts every future run, so it outranks the
+   artifact work even though it is less interesting.
+3. The reminder below.
+
+Apply fixes to the plugin-under-test in ITS OWN repo — which, unlike before, is very likely the SAME repo this main session is already CD'd into;
 don't confuse "editing the plugin" with "touching `.ab-bench/` or the testenv folder," those are
 never where the plugin's actual source lives. Then `/ab-bench:plan` for the next run. ab-bench
 never edits the plugin under test itself.

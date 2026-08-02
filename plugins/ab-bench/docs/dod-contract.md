@@ -37,29 +37,64 @@ shared path-resolution helpers every skill/script uses.
                                          session's cwd. The engine does NOT walk up looking for .dod/.
   checks/
     <id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb   type: script — exit code 0 = pass, nonzero = fail
+    <id>.meta.json                       optional sidecar for a script check:
+                                          { "seed_expectation": "fail",     // see below
+                                            "description": "one line" }
     <id>.md                              type: prompt or human, via YAML frontmatter:
                                           ---
                                           type: prompt        # or: human
                                           description: "one line"
-                                          model: claude-haiku-4-5-20251001   # prompt only, FULL id —
-                                                                # 'haiku' is not a CLI alias and
-                                                                # silently resolves to Sonnet
+                                          model: claude-haiku-4-5-20251001   # prompt only, FULL id
+                                                                # or a documented CLI alias
+                                                                # (fable|opus|sonnet). 'haiku' is
+                                                                # NOT an alias — it silently
+                                                                # resolved to Sonnet at ~4x, so it
+                                                                # is now REJECTED at gate time
+                                                                # rather than paid for.
+                                          seed_expectation: fail   # fail (default) | pass
+                                          agents: <name>,<name>    # optional, → --agents
+                                          plugin_dirs: <abs>,<abs> # optional, → --plugin-dir
                                           ---
                                           <grading question (prompt) or question-for-user (human)>
   sessions/
     <session_id>.json   {
       session_id, created_at, planning_invoked, session_goal,
       checks: [ "<id>", ... ],
-      state: { "<id>": { tier, last_result: "pending"|"pass"|"fail"|"waived"|"error", last_output, last_checked_at } },
+      state: { "<id>": { tier, last_result: "pending"|"pass"|"fail"|"waived"|"error", last_output,
+                         last_checked_at,
+                         evidence: [ { path, line?, quote } ],   // prompt tier, verdict v2
+                         confidence: "high"|"low",               // prompt tier, verdict v2
+                         answer_source: "arm-reported" } },       // human tier only
       history: [ { at, results: [ { check, result } ] } ]
     }
-  config.json            optional: {
+  config.json            WRITTEN AT SCAFFOLD TIME by ab-bench — not optional here: {
+                           "prompt_tier_gate": false,     // see below — this is the whole point
                            "runners":          { ".ext": "command" },
-                           "prompt_tier_gate": true,      // false = grade prompt checks even when a script check is red
                            "hook_budget_ms":   270000,    // hook self-terminates here so its writes always land
-                           "prompt_timeout_ms": 180000    // per prompt-checker subprocess
+                           "prompt_timeout_ms": 180000,   // per prompt-checker subprocess
+                           "script_timeout_ms": 30000     // per script check
                          }
 ```
+
+**`prompt_tier_gate` must be `false` for an A/B run, and ab-bench's scaffold writes it that
+way.** dod-lite defaults it to `true` — skip AI grading whenever any script check is red —
+which is correct for a normal project and wrong here: mid-run a script check is red almost by
+definition, so the entire AI-graded tier silently never executed. That was the whole
+"prompt checkers don't work" symptom. An A/B wants every quality dimension graded at the final
+state and knowingly pays for it. `writeDodConfig` never clobbers an existing file, so an
+operator can still tune it.
+
+**`seed_expectation` is what makes a check falsifiable.** It declares what the check must
+report against a pristine `seed/` — `fail` (the default: the task is not yet done, so the check
+is red) or `pass` (a regression guard, which contributes nothing to the A/B unless it flips and
+therefore needs a justification). `probe-checks.mjs` executes every check against a throwaway
+seed clone at plan time and again at fire time, and refuses to proceed on: `MISSING`, `BROKEN`
+(the check errored), `CRASHED` (a stack trace or parser error in the output — a crashing check
+exits non-zero, which otherwise reads as an honest `fail` and sails through), `CANNOT
+DISCRIMINATE` (result ≠ declaration), `DECLARED A REGRESSION GUARD` (a `pass` declaration with
+no justification), `UNGROUNDED` (a prompt check that passed citing no evidence), or `EMPTY` (a
+human check with no question). A check that passes on an untouched seed passes for every arm
+regardless of what they did — it looks green and measures nothing.
 
 `error` ≠ `fail`. `fail` is a grader verdict; `error` means the check could not be evaluated at all
 (checker subprocess timed out, crashed, returned no structured verdict, or the hook ran out of
@@ -85,31 +120,44 @@ and is reused across runs of the same experiment.
                                        every env underneath — never duplicated per env.
       envs/
         env-M/
-          env.json                 ← the arm-config contract (model + common/control/test blocks).
-                                       Locked once a run has fired against it — a config change
-                                       means a new env-(M+1), never an edit.
+          env.json                 ← the arm-config contract (model + artifacts + common/control/
+                                       test blocks). Locked once a run has fired against it — a
+                                       config change means a new env-(M+1), never an edit.
+      quality-rubric.md            ← written by /ab-bench:understand. The versioned anchored
+                                       scale the `quality` pillar is scored on. Main-session
+                                       only; an arm never sees it.
 
 ${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/    ← the TESTENV root,
     auto-derived (plugin repo's own folder basename — nothing the user names)
   seed/                    starting files cloned into both workspaces each run
-  ledger.md                run-over-run history table for this env
-  baselines/<ref>/         git worktree checkouts of pluginUnderTestRepo (see "previous-version
-                             baselines" in README) — cached, reused across runs pinning the same ref
+  ledger.md                flat run index for this env — one row per run
+  lab/                     run-over-run layer: objective.json, hypotheses.json, findings.md,
+                             regressions/, paper.md. Main-session only; an arm never sees it.
+  baselines/<id>/<ref>/    per-artifact immutable snapshots — a worktree at a pinned ref or HEAD
+                             sha, or `_wt-<hash>/` for a content-hashed copy of a dirty tree.
+                             Namespaced by artifact id: two artifacts may share a ref name.
+                             Cached and reused by every run resolving the same identity.
   .dod/
     checks/                 ← REAL check files, authored by /ab-bench:plan (script/prompt/human,
                                dod-lite's exact format). Shared + recycled across runs of this env.
     sessions/                ← owned entirely by ab-bench's arm-session-start.mjs (sole writer of
                                checks[]/session_goal), updated in place by dod-lite's Stop hook
                                (state{}/history[] only).
+    config.json              ← written at scaffold time with prompt_tier_gate: false.
   runs/run-NNN/
     dod-checks.json         ← THE PER-RUN ARTIFACT. Lives in the RUN folder, NOT in .dod/ — which
                                checks apply to THIS run is task-specific, while the check FILES in
                                .dod/checks/ are env-level shared state.
+    baseline.json           ← schema 2: arms.{control,test}.pins — every declared artifact's
+                               resolved, immutable identity for each arm this run.
     manifest.json            ← arm→session linkage, PLUS mandate/env lineage fields (which
                                mandate-N/env-M this run belongs to — redundant with folder
-                               location, but makes a stray copy of manifest.json self-describing).
+                               location, but makes a stray copy of manifest.json self-describing),
+                               PLUS arms.<arm>.artifacts[] and env_vars.
     control/  test/         ← arm workspaces; EACH gets .dod as a directory JUNCTION to THIS
                                testenv's own .dod/ (see "Why a junction" below — still required).
+      .dod-answers/         ← the arm's ONLY write channel into DoD state (human tier). NOT
+                               inside .dod/, deliberately: settings deny Edit(/.dod/**).
 ```
 
 Every skill/script resolves both roots the same way: `find-repo-root` (walk up for `.git`) +
@@ -161,9 +209,9 @@ running with cwd = the arm workspace, reads/writes/executes through the junction
 ## Injection: mandatory, not opt-in
 
 `launch-pair.mjs` unconditionally appends `plugins/dod-lite`'s absolute path to **both** arms'
-`pluginDirs` (`--plugin-dir`, same mechanism already used for a previous-version control baseline's
-worktree) — there is no `env.json` declaration to make and no way for it to be silently absent from
-one arm. Any legacy `env.json` that still lists a `dod-lite` marketplace ref or raw path is
+`pluginDirs` (`--plugin-dir`, same mechanism used to deliver any `plugin-dir` artifact's pinned
+snapshot) — there is no `env.json` declaration to make and no way for it to be silently absent
+from one arm. Any legacy `env.json` that still lists a `dod-lite` marketplace ref or raw path is
 defensively stripped before composing each arm's config (`stripDodLite()`), so an old experiment
 can never end up loading it twice.
 
@@ -203,6 +251,35 @@ never executed — the session file still read `last_checked_at: null` for all f
 at `hook_budget_ms` (270 s, under the 600 s hook timeout) so its writes always land, and any check it
 could not reach is recorded `error` rather than silently left `pending`.
 
+### Verdict contract v2 — a grader that cites nothing did not look
+
+A prompt checker returns JSON matching `VERDICT_SCHEMA`: `pass` (bool), `reason` (string),
+`evidence` (array of `{path, line?, quote}`), `confidence` (`high`|`low`) — all four required.
+`resources/prompt-checker-system.md` requires the citations. A `pass` with an empty `evidence`
+array is recorded as-is and **flagged ungrounded** by both `probe-checks.mjs` and
+`/ab-bench:analyze`; it is never silently accepted, because an uncited pass and a real pass are
+indistinguishable in the session file otherwise.
+
+`model` is validated before the subprocess spawns: a documented CLI alias (`fable`, `opus`,
+`sonnet`) or a full `claude-*` id. Anything else errors loudly at gate time rather than
+resolving to a bigger model and quietly costing ~4x. `DOD_LITE_CLAUDE_CMD` (a JSON array,
+`[exe, ...prefixArgs]`) substitutes the checker binary — the supported way to pin a specific
+`claude`, and what the test suite uses. Never shadow PATH: `spawn` runs with `shell:false`, so
+on Windows a `.cmd` shim is skipped and the real binary runs anyway.
+
+### Human tier — `.dod-answers/` is the arm's only write channel
+
+Arm settings deny `Edit(/.dod/**)`, so a human-tier check that told the arm to edit its own
+session file was **structurally unsatisfiable**: block, arm cannot comply, block, to Claude
+Code's 8-consecutive-stop cap. The arm now writes `<workspace>/.dod-answers/<id>.json` —
+`{ result, note, answered_at }` — and `dod-check.mjs` merges it into `session.state[id]` at the
+top of each run, stamping `answer_source: "arm-reported"`.
+
+The raw answer file survives beside the harness's record on purpose: `/ab-bench:analyze` can
+compare the two and flag a disagreement as a forged verdict. Answers stamped `arm-reported` are
+also what `hitl_harness` counts, and are subtracted from the `autonomy` pillar — an arm must
+not be penalised for interruptions the harness itself caused.
+
 ### Checker subprocesses are not arm sessions
 
 A prompt-tier check runs `claude -p` **inside the arm workspace**, so that subprocess inherits
@@ -239,15 +316,30 @@ marks `turn_counts.note` INCOMPLETE if a counter is ever missing at analyze time
    instead, tagged `source: "plugin-native"` in `dod-checks.json`.
 3. Write REAL, working check files into `<testenvRoot>/.dod/checks/<id>.<ext>` — scripts with actual
    exit-code logic, `.md` files with real self-contained grading/human questions. These get executed
-   for real by dod-lite's `Stop` hook every turn. No placeholders.
-4. Write `runs/run-NNN/dod-checks.json` recording the final control/test id lists + tier + source.
+   for real by dod-lite's `Stop` hook every turn. No placeholders. Every check declares a
+   `seed_expectation`.
+4. **Run `probe-checks.mjs` and pass it.** Every check is executed against a pristine clone of
+   `seed/` and must match its declaration. A rejection aborts — do not write `dod-checks.json`
+   until the gate is green. `/ab-bench:fire` re-runs the same probe, because a check edited
+   between planning and firing can stop discriminating without anyone noticing.
+5. Write `runs/run-NNN/dod-checks.json` recording the final control/test id lists + tier + source.
+
+Cost is real and worth stating: one seed clone plus N check executions per plan, and prompt
+checks are N genuine `claude -p` calls. It buys the only guarantee that a green run measured
+anything.
 
 ## What ab-analyze reads
 
 - `<testenvRoot>/.dod/sessions/<session-id>.json` per arm (semi-opaque past `checks`/`state`/
   `history` — anything else dod-lite adds is passed through to the session-comparator agent
-  untouched).
+  untouched). `evidence`/`confidence` feed the ungrounded-verdict check; `answer_source` feeds
+  `hitl_harness` and therefore the `autonomy` pillar.
+- `runs/run-NNN/<arm>/.dod-answers/*.json` — the arm's raw human-tier claims, compared against
+  the merged session state to catch a forged verdict.
 - `runs/run-NNN/dod-checks.json` — to explain (not flag as a violation) any control/test check-list
   asymmetry sourced from a plugin-native checker.
+- `runs/run-NNN/manifest.json` → `arms.<arm>.artifacts[]` — what each arm actually ran against.
+  This is what `comparison.json`'s `pins` is derived from, and what tells the comparator which
+  artifact is even eligible to be named as a cause.
 - `<configRoot>/env.json` and `<mandateFile>` (from `.ab-bench/` in the plugin repo, not
   `testenvRoot`) — the only two artifacts analyze reads from the config side rather than testenv.

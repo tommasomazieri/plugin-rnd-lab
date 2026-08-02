@@ -82,16 +82,19 @@ overwrite it), `.ab-bench/state.json` (current_mandate=mandate-1, current_env=en
 appends `.ab-bench/` to the repo's `.gitignore` if it wasn't already there. It prints the
 target paths (`envFile`, `mandateFile`, `testenvDir`, `displayName`) — use them below.
 
-Write `envFile` (the `env.json` the script pointed at) with schema 1:
+Write `envFile` (the `env.json` the script pointed at):
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "experiment": "<displayName from the script output>",
   "created": "<ISO date>",
   "model": "<model>",
   "mode": "interactive",
   "pluginUnderTestRepo": "<repoRoot>",
+  "artifacts": {
+    "<id>": { "repo": "<abs path>", "deliver": "plugin-dir" }
+  },
   "mcpServers": { "<name>": { "command": "...", "args": [], "env": {} } },
   "common":  { "plugins": [], "pluginDirs": [], "mcp": [] },
   "control": { "plugins": [], "pluginDirs": [], "mcp": [] },
@@ -102,6 +105,40 @@ Write `envFile` (the `env.json` the script pointed at) with schema 1:
 - `plugins`: marketplace refs for `enabledPlugins` (format `name@marketplace`)
 - `pluginDirs`: local plugin folders, become `--plugin-dir` flags
 - `mcp`: names referencing keys in the `mcpServers` pool
+
+### `artifacts` — the versioned things this experiment is testing
+
+An **artifact** is any git repo whose version an arm can be pinned to. Each declares how it
+reaches the arm:
+
+| `deliver` | effect |
+|---|---|
+| `plugin-dir` | the checkout's plugin roots become `--plugin-dir` flags |
+| `workspace:<subpath>` | the checkout is **copied** into `<workspace>/<subpath>` |
+| `env:<VARNAME>` | the checkout's absolute path is exported into the arm's launcher |
+| `none` | recorded in the manifest, delivered nowhere |
+
+A `workspace:` or `env:` artifact may also declare a `prepare` command (plus optional
+`prepareTimeoutSec`, default 900). ab-bench runs it in each arm's workspace before the
+session starts, logs it to `.launch/`, and **aborts the run if it fails**. Its cost is
+deliberately kept out of the arm's token and turn counts — a build is not a property of the
+thing under test.
+
+```json
+"artifacts": {
+  "my-plugin": { "repo": "<abs path>", "deliver": "plugin-dir" },
+  "my-lib":    { "repo": "<abs path>", "deliver": "workspace:vendor/lib",
+                 "prepare": "cmake -S vendor/lib -B build && cmake --build build" }
+}
+```
+
+**Ask the user whether the subject spans more than one repo.** Most experiments have exactly
+one artifact — the plugin under test — and the block above is all they need. If the subject
+is a plugin *and* something it depends on, declare both now: `/ab-bench:plan` can then pin
+them independently, which is the only way to ever tell which one caused a result.
+
+Omitting `artifacts` entirely is still valid — `pluginUnderTestRepo` is synthesized into a
+single `plugin-dir` artifact, which is exactly the pre-schema-2 behaviour.
 
 Then **mandatorily** invoke `/ab-bench:understand` (no argument needed — it reads
 `.ab-bench/state.json` via cwd same as this skill did) to write `mandateFile`, reusing the

@@ -17,18 +17,25 @@
  *
  * For each arm (control, test):
  *   1. clone seed/ into the arm workspace
- *   2. copy task.md -> <workspace>/TASK.md
- *   3. link <workspace>/.dod as a directory junction to <testenvRoot>/.dod — REQUIRED because
+ *   2. materialize that arm's pinned artifacts from runs/run-NNN/baseline.json —
+ *      `plugin-dir` ones become --plugin-dir flags, `workspace:<subpath>` ones are COPIED
+ *      into the workspace (never junctioned: the baselines/ cache is shared between arms
+ *      and an arm that builds in a delivered tree would corrupt it), `env:<VAR>` ones are
+ *      exported into the arm's launcher
+ *   3. run each artifact's optional `prepare` command in the workspace, logging to
+ *      .launch/prepare-<arm>-<id>.log. Non-zero exit ABORTS the run with no manifest —
+ *      a build is not a property of the thing under test, so its cost is kept out of the
+ *      arm's metrics and its failure is caught here rather than at analyze time
+ *   4. copy task.md -> <workspace>/TASK.md
+ *   5. link <workspace>/.dod as a directory junction to <testenvRoot>/.dod — REQUIRED because
  *      dod-lite resolves .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
- *   4. write <workspace>/.claude/settings.json with the SessionStart linkage hook
+ *   6. write <workspace>/.claude/settings.json with the SessionStart linkage hook
  *      (arm-session-start.mjs: manifest linkage + .dod registration + turn-counter init)
  *      and the Stop turn-counter hook (arm-turn-count.mjs)
- *   5. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json — control's
- *      pluginDirs also get runs/run-NNN/baseline.json's worktree paths layered in, if that run
- *      pinned control to a previous version instead of vanilla (see /ab-bench:plan step 2). Both
+ *   7. compose .launch/<arm>.settings.json (enabledPlugins) and .launch/<arm>.mcp.json. Both
  *      arms unconditionally also get DOD_LITE_DIR (plugins/dod-lite, the trimmed hooks-only DoD
  *      engine) appended — mandatory every run, never an env.json opt-in.
- *   6. spawn a detached titled terminal running:
+ *   8. spawn a detached titled terminal running:
  *      claude --model M --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
  *
  * The opening prompt is a fixed constant for parity across arms and across experiments.
@@ -41,8 +48,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+import { normalizeArtifacts, describeResolved } from '../../../lib/artifacts.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ARM_HOOK_SCRIPT = path.join(SCRIPT_DIR, 'arm-session-start.mjs');
@@ -62,15 +71,16 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const args = { configRoot: null, testenvRoot: null, run: null, dryRun: false };
+  const args = { configRoot: null, testenvRoot: null, run: null, dryRun: false, noSpawn: false };
   const positional = [];
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') args.dryRun = true;
+    else if (a === '--no-spawn') args.noSpawn = true;
     else if (a === '--run') args.run = argv[++i];
     else positional.push(a);
   }
-  if (positional.length < 2) fail('usage: node launch-pair.mjs <configRoot> <testenvRoot> [--run run-NNN] [--dry-run]');
+  if (positional.length < 2) fail('usage: node launch-pair.mjs <configRoot> <testenvRoot> [--run run-NNN] [--dry-run|--no-spawn]');
   args.configRoot = path.resolve(positional[0]);
   args.testenvRoot = path.resolve(positional[1]);
   return args;
@@ -107,19 +117,50 @@ function loadEnv(configRoot) {
   return env;
 }
 
-// runs/run-NNN/baseline.json — written by /ab-bench:plan's resolve-baseline.mjs. Absent (or
-// type "vanilla") means today's behavior: control gets nothing beyond env.json's own control
-// block. type "previous-version" layers a git-worktree checkout's pluginDirs onto control for
-// THIS run only — env.json's control block is never touched (baseline varies per run, env.json
-// is locked for the experiment's whole life).
+// runs/run-NNN/baseline.json — written by /ab-bench:plan's resolve-baseline.mjs. Carries,
+// per arm, the resolved immutable identity of every declared artifact for THIS run only;
+// env.json is never touched (pins vary per run, env.json is locked for the experiment's
+// whole life). Absent means no artifacts for either arm.
+//
+// Schema 1 (one plugin, control-only, {control_baseline: {type, pluginDirs}}) is mapped
+// onto the schema-2 shape here so nothing downstream has to know two formats exist.
 function loadBaseline(runDir) {
   const p = path.join(runDir, 'baseline.json');
-  if (!fs.existsSync(p)) return { control_baseline: { type: 'vanilla' } };
+  const empty = { schema: 2, arms: { control: { pins: {} }, test: { pins: {} } } };
+  if (!fs.existsSync(p)) return empty;
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    raw = JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (e) {
     fail(`runs/${path.basename(runDir)}/baseline.json is not valid JSON: ${e.message}`);
   }
+  if (raw.schema === 2 && raw.arms) {
+    for (const arm of ARMS) raw.arms[arm] = raw.arms[arm] || { pins: {} };
+    return raw;
+  }
+  const legacy = raw.control_baseline || { type: 'vanilla' };
+  const out = { schema: 2, arms: { control: { pins: {} }, test: { pins: {} } }, migrated_from_schema: 1 };
+  if (legacy.type === 'previous-version') {
+    out.arms.control.pins[path.basename(legacy.repoPath || 'plugin-under-test')] = {
+      id: path.basename(legacy.repoPath || 'plugin-under-test'),
+      repo: legacy.repoPath || null,
+      deliver: 'plugin-dir',
+      requested_ref: legacy.ref || null,
+      resolved: {
+        kind: 'ref',
+        sha: null,
+        hash: null,
+        dirty: false,
+        path: legacy.worktreePath || null,
+        pluginDirs: legacy.pluginDirs || [],
+      },
+    };
+  }
+  return out;
+}
+
+function armPins(baseline, arm) {
+  return Object.values(baseline.arms?.[arm]?.pins || {});
 }
 
 function findRun(testenvRoot, explicit) {
@@ -164,12 +205,11 @@ function stripDodLite(refs) {
 
 function composeArm(env, arm, globalEnabled, baseline) {
   const plugins = stripDodLite([...env.common.plugins, ...env[arm].plugins]);
-  const baselineDirs =
-    arm === 'control' && baseline.control_baseline.type === 'previous-version'
-      ? baseline.control_baseline.pluginDirs
-      : [];
+  // Both arms resolve their pins the same way — there is no control-only special case
+  // any more. An arm with no plugin-dir artifacts simply contributes nothing here.
+  const pinnedDirs = armPins(baseline, arm).flatMap((pin) => pin.resolved?.pluginDirs || []);
   const pluginDirs = [
-    ...stripDodLite([...env.common.pluginDirs, ...env[arm].pluginDirs, ...baselineDirs]),
+    ...stripDodLite([...env.common.pluginDirs, ...env[arm].pluginDirs, ...pinnedDirs]),
     DOD_LITE_DIR,
   ].map((p) => path.resolve(p));
   const mcpNames = [...env.common.mcp, ...env[arm].mcp];
@@ -193,6 +233,90 @@ function copySeed(testenvRoot, workspace) {
   const seed = path.join(testenvRoot, 'seed');
   if (fs.existsSync(seed) && fs.readdirSync(seed).length > 0) {
     fs.cpSync(seed, workspace, { recursive: true });
+  }
+}
+
+/**
+ * Put each pinned artifact where the arm can reach it, per its declared delivery mode.
+ *
+ * `workspace:` artifacts are COPIED, never junctioned: the cache under baselines/ is
+ * shared between both arms and across every run pinning the same ref, and an arm that
+ * builds in a delivered source tree would corrupt it for everyone. plugin-dir artifacts
+ * are read-only to Claude Code, so those stay as shared paths.
+ *
+ * Returns the env vars the arm's launcher must export.
+ */
+function materializePins(workspace, pins) {
+  const envVars = {};
+  for (const pin of pins) {
+    const src = pin.resolved?.path;
+    const deliver = String(pin.deliver || 'plugin-dir');
+    if (deliver === 'plugin-dir' || deliver === 'none') continue;
+    if (!src || !fs.existsSync(src)) {
+      fail(`artifact "${pin.id}" resolved to a path that does not exist: ${src} — re-run /ab-bench:plan to re-resolve baselines`);
+    }
+    if (deliver.startsWith('workspace:')) {
+      const subpath = deliver.slice('workspace:'.length).replace(/^[\\/]+/, '');
+      const dest = path.join(workspace, subpath);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.cpSync(src, dest, { recursive: true });
+      // The snapshot marker is bookkeeping, not part of the delivered artifact.
+      fs.rmSync(path.join(dest, '.ab-bench-snapshot.json'), { force: true });
+    } else if (deliver.startsWith('env:')) {
+      envVars[deliver.slice('env:'.length)] = src;
+    } else {
+      fail(`artifact "${pin.id}" has an unknown deliver mode "${deliver}"`);
+    }
+  }
+  return envVars;
+}
+
+/**
+ * Run each artifact's declared `prepare` command in the arm workspace before the session
+ * starts. Cost lands in .launch/, not in the arm's tokens or turns: a build is not a
+ * property of the thing under test, so charging it to the arm is measurement noise.
+ *
+ * A non-zero exit aborts the whole run. A pin that cannot be built is not a result worth
+ * collecting, and finding out at analyze time costs a full run.
+ */
+function runPrepare(workspace, arm, pins, artifacts, launchDir, extraEnv) {
+  for (const pin of pins) {
+    const spec = artifacts[pin.id];
+    if (!spec || !spec.prepare) continue;
+    const logPath = path.join(launchDir, `prepare-${arm}-${pin.id}.log`);
+    console.log(`[ab-bench] ${arm}: preparing "${pin.id}" — ${spec.prepare}`);
+    const started = Date.now();
+    const r = spawnSync(spec.prepare, {
+      cwd: workspace,
+      shell: true,
+      encoding: 'utf8',
+      timeout: spec.prepareTimeoutSec * 1000,
+      env: { ...process.env, ...extraEnv, AB_BENCH_ARM: arm, AB_BENCH_WORKSPACE: workspace },
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+    fs.writeFileSync(
+      logPath,
+      [
+        `# prepare: ${pin.id} (${arm})`,
+        `# command: ${spec.prepare}`,
+        `# cwd: ${workspace}`,
+        `# exit: ${r.status}${r.error ? ` (${r.error.message})` : ''}  elapsed: ${elapsed}s`,
+        '',
+        '--- stdout ---',
+        r.stdout || '',
+        '--- stderr ---',
+        r.stderr || '',
+      ].join('\n'),
+    );
+    if (r.error || r.status !== 0) {
+      fail(
+        `prepare failed for artifact "${pin.id}" on the ${arm} arm (exit ${r.status ?? 'n/a'}${r.error ? `, ${r.error.message}` : ''}).\n` +
+          `  log: ${logPath}\n` +
+          '  No manifest was written — fix the build and fire again.',
+      );
+    }
+    console.log(`[ab-bench] ${arm}: prepared "${pin.id}" in ${elapsed}s -> ${logPath}`);
   }
 }
 
@@ -298,7 +422,7 @@ function spawnTerminal(title, batchFile) {
 }
 
 function main() {
-  const { configRoot, testenvRoot, run, dryRun } = parseArgs(process.argv);
+  const { configRoot, testenvRoot, run, dryRun, noSpawn } = parseArgs(process.argv);
   const env = loadEnv(configRoot);
   const lineage = lineageFromConfigRoot(configRoot);
   const runDir = findRun(testenvRoot, run);
@@ -311,6 +435,12 @@ function main() {
 
   const globalEnabled = loadGlobalEnabledPlugins();
   const baseline = loadBaseline(runDir);
+  let artifacts;
+  try {
+    artifacts = normalizeArtifacts(env);
+  } catch (e) {
+    fail(`env.json artifacts: ${e.message}`);
+  }
   const composed = {};
   const parity = { equal: {}, differs: {} };
   for (const arm of ARMS) composed[arm] = composeArm(env, arm, globalEnabled, baseline);
@@ -326,7 +456,29 @@ function main() {
   // actually show up in the parity report.
   parity.differs.control = { plugins: env.control.plugins, pluginDirs: composed.control.pluginDirs, mcp: env.control.mcp };
   parity.differs.test = { plugins: env.test.plugins, pluginDirs: composed.test.pluginDirs, mcp: env.test.mcp };
-  parity.control_baseline = baseline.control_baseline;
+
+  // The resolved identity of every artifact on both arms. This is what makes a run
+  // replayable and what tells you, months later, exactly what was compared to what.
+  parity.pins = {};
+  for (const arm of ARMS) {
+    parity.pins[arm] = armPins(baseline, arm).map((pin) => ({
+      id: pin.id,
+      deliver: pin.deliver,
+      requested_ref: pin.requested_ref,
+      kind: pin.resolved?.kind,
+      sha: pin.resolved?.sha,
+      hash: pin.resolved?.hash,
+      dirty: Boolean(pin.resolved?.dirty),
+      path: pin.resolved?.path,
+      prepare: artifacts[pin.id]?.prepare || null,
+      prepare_cost: artifacts[pin.id]?.prepare ? 'excluded from arm metrics (harness-run)' : 'n/a',
+    }));
+  }
+  const pinIds = (arm) => parity.pins[arm].map((p) => `${p.id}@${p.requested_ref || p.kind}`).sort().join(',');
+  parity.pins_symmetric = pinIds('control') === pinIds('test');
+  // A dirty pin is legitimate (it is snapshotted, so the run is still replayable) but it
+  // is not a named ref, so nobody can reconstruct it from git alone. Say so.
+  parity.pins_dirty = ARMS.flatMap((arm) => parity.pins[arm].filter((p) => p.dirty).map((p) => `${arm}:${p.id}`));
 
   const dodChecksPath = path.join(runDir, 'dod-checks.json');
   if (fs.existsSync(dodChecksPath)) {
@@ -366,10 +518,23 @@ function main() {
     fs.writeFileSync(settingsFile, JSON.stringify({ enabledPlugins: composed[arm].enabledPlugins }, null, 2));
     fs.writeFileSync(mcpFile, JSON.stringify({ mcpServers: composed[arm].mcpServers }, null, 2));
 
+    const pins = armPins(baseline, arm);
+
+    // Order matters: seed first (it may contain scaffolding an artifact overlays), then
+    // artifacts, then prepare — a prepare command expects both to already be in place.
+    let armEnv = {};
+    if (!dryRun) {
+      fs.mkdirSync(workspace, { recursive: true });
+      copySeed(testenvRoot, workspace);
+      armEnv = materializePins(workspace, pins);
+      runPrepare(workspace, arm, pins, artifacts, launchDir, armEnv);
+    }
+
     const claudeCmd = buildClaudeCommand(env, composed[arm], settingsFile, mcpFile);
     const batch = [
       '@echo off',
       'chcp 65001 >nul',
+      ...Object.entries(armEnv).map(([k, v]) => `set ${k}=${v}`),
       // this whole launcher runs via the Bash tool inside a Claude Code session, so
       // CLAUDE_CODE_CHILD_SESSION/CLAUDECODE leak down through cmd.exe -> start -> cmd /k
       // into each arm's claude.exe, which misclassifies it as nested and silently drops
@@ -385,8 +550,6 @@ function main() {
 
     if (dryRun) continue;
 
-    fs.mkdirSync(workspace, { recursive: true });
-    copySeed(testenvRoot, workspace);
     fs.copyFileSync(path.join(runDir, 'task.md'), path.join(workspace, 'TASK.md'));
     linkDodFolder(workspace, dodDir);
     writeWorkspaceSettings(workspace, manifestPath, arm, dodDir);
@@ -397,19 +560,32 @@ function main() {
       settings_file: settingsFile,
       mcp_file: mcpFile,
       plugin_dirs: composed[arm].pluginDirs,
+      // The full resolved identity of what this arm ran against. Replayability and every
+      // cross-run comparison in lab/ depend on this being complete and immutable.
+      artifacts: pins.map((pin) => ({
+        id: pin.id,
+        repo: pin.repo,
+        deliver: pin.deliver,
+        requested_ref: pin.requested_ref,
+        resolved: pin.resolved,
+        prepare: artifacts[pin.id]?.prepare || null,
+      })),
+      env_vars: armEnv,
       spawn_pid: null,
       sessions: [],
     };
-    if (arm === 'control') {
-      manifest.arms.control.baseline =
-        baseline.control_baseline.type === 'previous-version'
-          ? { type: 'previous-version', ref: baseline.control_baseline.ref }
-          : { type: 'vanilla' };
-    }
   }
 
   if (dryRun) {
     console.log(`[ab-bench] DRY RUN — composed ${runName} launch artifacts in ${launchDir}`);
+    for (const arm of ARMS) {
+      const pins = armPins(baseline, arm);
+      console.log(`[ab-bench]   ${arm}: ${pins.length ? pins.map(describeResolved).join(', ') : 'vanilla (no artifacts)'}`);
+    }
+    if (parity.pins_dirty.length > 0) {
+      console.log(`[ab-bench]   NOTE: snapshotted from a dirty tree (no named ref): ${parity.pins_dirty.join(', ')}`);
+    }
+    console.log('[ab-bench]   (dry run composes only — no workspace, no artifact delivery, no prepare)');
     console.log(`[ab-bench] parity report: ${path.join(launchDir, 'parity-report.json')}`);
     return;
   }
@@ -417,6 +593,13 @@ function main() {
   fs.mkdirSync(path.join(runDir, 'analysis'), { recursive: true });
 
   for (const arm of ARMS) {
+    if (noSpawn) {
+      // Workspaces, artifacts, prepare and the manifest are all real — only the terminal
+      // is withheld. Lets a run be staged and inspected (and tested) before it starts.
+      console.log(`[ab-bench] --no-spawn: ${arm} arm staged at ${manifest.arms[arm].workspace}`);
+      manifest.arms[arm].status = 'staged';
+      continue;
+    }
     const title = `AB ${env.experiment} ${arm} ${runName}`;
     const pid = spawnTerminal(title, path.join(launchDir, `${arm}.launch.cmd`));
     manifest.arms[arm].spawn_pid = pid;

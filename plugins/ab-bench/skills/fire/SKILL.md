@@ -42,8 +42,32 @@ Then read `runs/run-NNN/.launch/parity-report.json` and show the user a terse su
   explained by a plugin-native checker (check each item's `source`) — surface it as a fact, not
   automatically as a problem.
 
+Also read and report `pins`, `pins_symmetric` and `pins_dirty`:
+- **`pins`** — the resolved identity of every artifact on both arms. This is what the run is
+  actually comparing; state it in plain terms ("control on my-plugin@v0.2.0, test on the
+  current working tree").
+- **`pins_dirty`** — any arm pinned to a snapshot of an uncommitted tree. The run IS
+  replayable (the snapshot is cached and immutable, and editing the repo now cannot affect
+  it), but it is **not reconstructible from git history alone**. Say so; offer to commit
+  first if the run matters.
+- **`prepare_cost`** — if any artifact declares a `prepare` command, its build time and
+  output are excluded from the arm's metrics. Mention it, because it changes how the
+  numbers should be read.
+
 If anything looks asymmetric beyond the declared deltas AND beyond a documented plugin-native
 checker difference, STOP and fix env.json or `dod-checks.json` before firing.
+
+## 1b. Re-prove the DoD checks still discriminate
+
+`/ab-bench:plan` gated on this, but checks can be edited between planning and firing — and a
+check that stopped discriminating produces a green run that measured nothing.
+
+```
+node "${CLAUDE_SKILL_DIR}/../plan/scripts/probe-checks.mjs" "<testenvRoot>" "<runDir>"
+```
+
+Non-zero exit means **do not fire**. Report which check was rejected and why, then hand back
+to `/ab-bench:plan` step 4 to fix it. Skip only if the run has no `dod-checks.json` at all.
 
 ## 2. Fire
 
