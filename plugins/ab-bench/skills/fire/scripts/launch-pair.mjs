@@ -39,7 +39,14 @@
  *      claude --model M --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
  *
  * The opening prompt is a fixed constant for parity across arms and across experiments.
- * Launch recipe ported from agentic_pm_app ccLauncher.ts (start "title" cmd /k batch).
+ *
+ * Terminal host: Windows Terminal + PowerShell, via a generated .ps1 per arm. The launch
+ * recipe was originally `start "title" cmd /k <batch>`, ported from agentic_pm_app
+ * ccLauncher.ts. It ran, and it put both arms in a legacy conhost console, where Claude
+ * Code's TUI renders with no colour at all. For a benchmark whose deliverable is visual
+ * and whose operator watches two windows side by side for hours, a monochrome console is
+ * a real defect, not a cosmetic one. wt.exe is used when present, with pwsh.exe and then
+ * powershell.exe as fallbacks; the choice is made once and applied to both arms.
  *
  * --dry-run: compose .launch/ artifacts + parity report, spawn nothing, write no
  * manifest (run stays fireable).
@@ -396,22 +403,65 @@ function linkDodFolder(workspace, dodDir) {
   fs.symlinkSync(dodDir, link, 'junction');
 }
 
-function quoteBatchArg(arg) {
-  if (/[\s"^&|<>()]/.test(arg)) return `"${arg.replace(/"/g, '""')}"`;
-  return arg;
+/** A PowerShell single-quoted literal: nothing expands, only `'` needs doubling. */
+function psQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 function buildClaudeCommand(env, armConfig, settingsFile, mcpFile) {
-  const args = ['claude', '--model', env.model, '--settings', settingsFile];
+  const args = ['--model', env.model, '--settings', settingsFile];
   // always strict, even with an empty pool: arms must not fall back to globally configured MCPs
   args.push('--mcp-config', mcpFile, '--strict-mcp-config');
   for (const dir of armConfig.pluginDirs) args.push('--plugin-dir', dir);
   args.push(OPENING_PROMPT);
-  return args.map(quoteBatchArg).join(' ');
+  // Built as an array and splatted rather than as one interpolated command line. Paths
+  // here contain spaces and the opening prompt contains a period and a comma; hand-quoting
+  // that into a single string is how a launcher ends up passing half a prompt. Splatting
+  // hands each element to claude.exe as exactly one argv entry, whatever is inside it.
+  return [
+    `$claudeArgs = @(${args.map(psQuote).join(', ')})`,
+    '& claude @claudeArgs',
+  ].join('\r\n');
 }
 
-function spawnTerminal(title, batchFile) {
-  const line = `start "${title}" cmd /k "${batchFile}"`;
+/**
+ * Where the arm's terminal comes from, best first.
+ *
+ * The original recipe was `start "<title>" cmd /k <batch>`, inherited from an older
+ * launcher. It works, and it is the wrong window: a legacy conhost console renders
+ * Claude Code's TUI without colour, so both arms come up monochrome. That is not
+ * cosmetic in a benchmark whose whole subject is a VISUAL deliverable — the operator
+ * reads these two windows side by side for hours, and a washed-out console makes the
+ * arms harder to tell apart and the output harder to judge.
+ *
+ * Windows Terminal is the right host: true colour, the tab title we already compute,
+ * and a real PowerShell underneath. Fall back only when it genuinely is not installed.
+ */
+function resolveTerminalHost() {
+  const wt = spawnSync('where', ['wt.exe'], { encoding: 'utf8', shell: true });
+  if (wt.status === 0 && (wt.stdout || '').trim()) return 'wt';
+  const pwsh = spawnSync('where', ['pwsh.exe'], { encoding: 'utf8', shell: true });
+  if (pwsh.status === 0 && (pwsh.stdout || '').trim()) return 'pwsh';
+  return 'powershell';
+}
+
+function spawnTerminal(title, scriptFile, host) {
+  // -NoExit keeps the window up after claude exits, so a crashed arm can still be read.
+  // -ExecutionPolicy Bypass because the launch script is generated, not signed.
+  const psArgs = `-NoExit -NoLogo -ExecutionPolicy Bypass -File "${scriptFile}"`;
+
+  let line;
+  if (host === 'wt') {
+    // `wt` takes the title itself, so no `start` wrapper and no lost quoting. Semicolons
+    // are wt's own argument separator and must be escaped in a path; none of ours contain
+    // one, but the title is operator-facing text, so strip them there.
+    line = `wt.exe --title "${title.replace(/;/g, ',')}" powershell.exe ${psArgs}`;
+  } else {
+    const exe = host === 'pwsh' ? 'pwsh.exe' : 'powershell.exe';
+    // `start` needs a title argument first or it eats the quoted exe path as the title.
+    line = `start "${title}" ${exe} ${psArgs}`;
+  }
+
   const child = spawn('cmd.exe', ['/d', '/s', '/c', line], {
     detached: true,
     stdio: 'ignore',
@@ -513,7 +563,7 @@ function main() {
     const workspace = path.join(runDir, arm);
     const settingsFile = path.join(launchDir, `${arm}.settings.json`);
     const mcpFile = path.join(launchDir, `${arm}.mcp.json`);
-    const batchFile = path.join(launchDir, `${arm}.launch.cmd`);
+    const scriptFile = path.join(launchDir, `${arm}.launch.ps1`);
 
     fs.writeFileSync(settingsFile, JSON.stringify({ enabledPlugins: composed[arm].enabledPlugins }, null, 2));
     fs.writeFileSync(mcpFile, JSON.stringify({ mcpServers: composed[arm].mcpServers }, null, 2));
@@ -531,22 +581,27 @@ function main() {
     }
 
     const claudeCmd = buildClaudeCommand(env, composed[arm], settingsFile, mcpFile);
-    const batch = [
-      '@echo off',
-      'chcp 65001 >nul',
-      ...Object.entries(armEnv).map(([k, v]) => `set ${k}=${v}`),
+    const script = [
+      '$ErrorActionPreference = "Continue"',
+      // UTF-8 in and out. The old cmd batch did this with `chcp 65001`; PowerShell needs
+      // the console encodings set explicitly or box-drawing and em dashes come out as
+      // mojibake in the arm's own TUI and in anything it echoes back.
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      '$OutputEncoding = [System.Text.Encoding]::UTF8',
+      'chcp 65001 > $null',
+      ...Object.entries(armEnv).map(([k, v]) => `$env:${k} = ${psQuote(v)}`),
       // this whole launcher runs via the Bash tool inside a Claude Code session, so
-      // CLAUDE_CODE_CHILD_SESSION/CLAUDECODE leak down through cmd.exe -> start -> cmd /k
-      // into each arm's claude.exe, which misclassifies it as nested and silently drops
-      // transcript persistence (hooks/cost tracking still work — separate subsystem).
+      // CLAUDE_CODE_CHILD_SESSION/CLAUDECODE leak down through the spawn chain into each
+      // arm's claude.exe, which misclassifies it as nested and silently drops transcript
+      // persistence (hooks/cost tracking still work — separate subsystem).
       // Confirmed via code.claude.com/docs/en/env-vars (CLAUDE_CODE_FORCE_SESSION_PERSISTENCE),
       // this is the documented override for exactly this "background launcher" case.
-      'set CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1',
-      `cd /d "${workspace}"`,
+      '$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"',
+      `Set-Location -LiteralPath ${psQuote(workspace)}`,
       claudeCmd,
       '',
     ].join('\r\n');
-    fs.writeFileSync(batchFile, batch);
+    fs.writeFileSync(scriptFile, script, 'utf8');
 
     if (dryRun) continue;
 
@@ -592,6 +647,13 @@ function main() {
 
   fs.mkdirSync(path.join(runDir, 'analysis'), { recursive: true });
 
+  // Resolved once, so both arms are hosted identically. An asymmetry here would be a
+  // parity break in the most literal sense: two arms in two different terminals.
+  const host = noSpawn ? null : resolveTerminalHost();
+  if (host && host !== 'wt') {
+    console.log(`[ab-bench] NOTE: wt.exe not found — falling back to ${host === 'pwsh' ? 'pwsh.exe' : 'powershell.exe'} in a standalone console. Install Windows Terminal for a colour-capable arm window.`);
+  }
+
   for (const arm of ARMS) {
     if (noSpawn) {
       // Workspaces, artifacts, prepare and the manifest are all real — only the terminal
@@ -601,8 +663,9 @@ function main() {
       continue;
     }
     const title = `AB ${env.experiment} ${arm} ${runName}`;
-    const pid = spawnTerminal(title, path.join(launchDir, `${arm}.launch.cmd`));
+    const pid = spawnTerminal(title, path.join(launchDir, `${arm}.launch.ps1`), host);
     manifest.arms[arm].spawn_pid = pid;
+    manifest.arms[arm].terminal_host = host;
     console.log(`[ab-bench] launched ${arm} arm (pid ${pid ?? '?'}) — "${title}"`);
   }
 

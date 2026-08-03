@@ -203,11 +203,45 @@ test('schema 2: env: delivery exports a path into the arm launcher', () => {
   node(SCRIPTS.resolveBaseline, [configRoot, testenvRoot, runDir]);
   node(SCRIPTS.launchPair, [configRoot, testenvRoot, '--no-spawn']);
 
-  const batch = fs.readFileSync(path.join(runDir, '.launch', 'control.launch.cmd'), 'utf8');
-  assert.match(batch, /^set LIB_ROOT=.+$/m);
+  const script = fs.readFileSync(path.join(runDir, '.launch', 'control.launch.ps1'), 'utf8');
+  assert.match(script, /^\$env:LIB_ROOT = '.+'$/m);
   const manifest = readJson(path.join(runDir, 'manifest.json'));
   assert.ok(manifest.arms.control.env_vars.LIB_ROOT);
   assert.ok(!fs.existsSync(path.join(runDir, 'control', 'vendor')), 'env delivery copies nothing');
+});
+
+test('the arm launcher is a PowerShell script that splats claude args', () => {
+  // Regression guard. The launcher used to emit a .cmd batch run under `cmd /k`, which
+  // put both arms in a legacy conhost console with no colour at all — in a benchmark
+  // whose deliverable is visual and whose operator reads two windows side by side.
+  const pluginRepo = makePluginRepo();
+  const { configRoot, testenvRoot } = makeEnvPair(
+    baseEnv({ artifacts: { demo: { repo: pluginRepo, deliver: 'plugin-dir' } } }),
+  );
+  const runDir = makeRun(testenvRoot);
+  node(SCRIPTS.resolveBaseline, [configRoot, testenvRoot, runDir]);
+  node(SCRIPTS.launchPair, [configRoot, testenvRoot, '--no-spawn']);
+
+  for (const arm of ['control', 'test']) {
+    const p = path.join(runDir, '.launch', `${arm}.launch.ps1`);
+    assert.ok(fs.existsSync(p), `${arm} launcher should be a .ps1`);
+    assert.ok(!fs.existsSync(path.join(runDir, '.launch', `${arm}.launch.cmd`)),
+      `${arm} must not fall back to a .cmd batch`);
+
+    const script = fs.readFileSync(p, 'utf8');
+    // Arguments go through an array + splat, never an interpolated command line: paths
+    // carry spaces and the opening prompt carries punctuation.
+    assert.match(script, /^\$claudeArgs = @\(.+\)$/m);
+    assert.match(script, /^& claude @claudeArgs$/m);
+    assert.match(script, /^Set-Location -LiteralPath '.+'$/m);
+    // Session persistence override must survive the shell change.
+    assert.match(script, /^\$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"$/m);
+    // UTF-8, or box-drawing in the arm's own TUI comes out as mojibake.
+    assert.match(script, /OutputEncoding/);
+    // No cmd-isms left behind.
+    assert.ok(!/^set [A-Z_]+=/m.test(script), 'no cmd `set VAR=` lines');
+    assert.ok(!/^@echo off$/m.test(script), 'no cmd batch header');
+  }
 });
 
 test('prepare: runs per arm, is logged, and its output stays out of the arm', () => {
