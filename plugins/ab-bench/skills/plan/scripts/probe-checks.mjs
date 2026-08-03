@@ -246,7 +246,17 @@ async function main() {
       });
     }
   } finally {
-    fs.rmSync(probe, { recursive: true, force: true });
+    // Failing to delete a disposable temp dir must never discard a completed probe.
+    // The report prints AFTER this block, so an exception here destroys every verdict
+    // the probe just paid for — on this run, four real `claude -p` calls at up to the
+    // configured prompt timeout each. Windows raises EPERM here routinely when an
+    // indexer, a scanner or a lingering child handle still holds the directory, which
+    // has nothing to do with whether the checks discriminate.
+    try {
+      fs.rmSync(probe, { recursive: true, force: true });
+    } catch (err) {
+      console.error(`[probe-checks] WARN: could not remove probe workspace ${probe} (${err.code || err.message}). It is disposable — delete it by hand. Results below are unaffected.`);
+    }
   }
 
   rows.sort((a, b) => a.id.localeCompare(b.id));
