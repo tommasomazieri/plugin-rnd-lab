@@ -44,6 +44,36 @@ import { loadRunners } from '../../../../dod-lite/hooks/lib.mjs';
 
 const PROBE_CONCURRENCY = 4;
 
+const DEFAULT_PROMPT_TIMEOUT_MS = 180_000;
+const PROBE_HARD_CAP_MS = 600_000;
+
+/**
+ * The probe must give a prompt check the SAME budget the run will give it.
+ *
+ * This was hardcoded at 180s while `.dod/config.json` carried the timeout the arms
+ * actually run under. An experiment that had raised `prompt_timeout_ms` — because it
+ * measured a grader needing longer, which is the only reason anyone raises it — got a
+ * correctly-configured check killed at 180s and rejected as BROKEN. Since
+ * `/ab-bench:fire` re-runs this same probe and refuses to launch on a rejection, that
+ * mismatch does not merely warn: it blocks the run, and it does so more often the
+ * closer the grader sits to 180s, so it presents as flaky rather than as a bug.
+ *
+ * The failure mode is already in one experiment's ledger from the other direction:
+ * a 180s default killed a prompt check mid-run and produced no verdict in either arm.
+ * The timeout is a property of the experiment, not of the probe.
+ */
+function promptTimeoutMs(testenvRoot) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(testenvRoot, '.dod', 'config.json'), 'utf8'));
+    if (Number.isFinite(cfg.prompt_timeout_ms) && cfg.prompt_timeout_ms > 0) {
+      return Math.min(cfg.prompt_timeout_ms, PROBE_HARD_CAP_MS);
+    }
+  } catch {
+    // No config, or unreadable — the default is the documented behaviour.
+  }
+  return DEFAULT_PROMPT_TIMEOUT_MS;
+}
+
 function fail(msg) {
   console.error(`[probe-checks] ERROR: ${msg}`);
   process.exit(1);
@@ -164,6 +194,10 @@ async function main() {
   }
 
   const probe = makeProbeWorkspace(testenvRoot);
+  const promptTimeout = promptTimeoutMs(testenvRoot);
+  if (promptTimeout !== DEFAULT_PROMPT_TIMEOUT_MS) {
+    console.log(`[probe-checks] prompt timeout ${promptTimeout} ms, from .dod/config.json`);
+  }
   const defs = await loadCheckDefs(probe, ids);
   const runners = await loadRunners(probe);
   const systemPrompt = await loadSystemPrompt();
@@ -189,7 +223,7 @@ async function main() {
 
     await runWithConcurrency(promptIds, PROBE_CONCURRENCY, async (id) => {
       const expected = seedExpectation(defs[id]);
-      const r = await runPromptCheck(probe, id, defs[id], systemPrompt, 180_000, 600_000);
+      const r = await runPromptCheck(probe, id, defs[id], systemPrompt, promptTimeout, PROBE_HARD_CAP_MS);
       const v = verdictFor(r, expected, defs[id]);
       // A grader that reaches the right verdict while citing nothing reached it by luck.
       if (v.ok && r.result === 'pass' && r.grounded === false) {
