@@ -597,6 +597,22 @@ function main() {
       // Confirmed via code.claude.com/docs/en/env-vars (CLAUDE_CODE_FORCE_SESSION_PERSISTENCE),
       // this is the documented override for exactly this "background launcher" case.
       '$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"',
+      // Same leak, different variable, and this one is why c2e3e68 did not fix what it
+      // was written to fix. Claude Code sets NO_COLOR=1 in the environment of the tool
+      // subprocesses it spawns, so a launcher run from inside a session hands NO_COLOR
+      // down the whole chain — cmd, wt, powershell, and finally the arm's own claude.exe,
+      // which honours it and renders its TUI monochrome. Verified process-scoped only:
+      // NO_COLOR is empty at both User and Machine scope on the operator's machine, so
+      // it is injected per-process rather than configured. c2e3e68 replaced the legacy
+      // cmd console with Windows Terminal on the theory that the HOST was washing out the
+      // colour; the host was innocent, and run-006 came up monochrome in Windows Terminal
+      // with terminal_host recorded as "wt". Scrubbing it here rather than in the spawn
+      // env is deliberate: the arm window must look the same whether it was fired from a
+      // Claude Code session, a bare PowerShell, or CI.
+      'Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue',
+      'Remove-Item Env:CLICOLOR -ErrorAction SilentlyContinue',
+      '$env:FORCE_COLOR = "1"',
+      '$env:CLICOLOR_FORCE = "1"',
       `Set-Location -LiteralPath ${psQuote(workspace)}`,
       claudeCmd,
       '',
