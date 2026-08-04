@@ -63,10 +63,12 @@ import { normalizeArtifacts, describeResolved } from '../../../lib/artifacts.mjs
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ARM_HOOK_SCRIPT = path.join(SCRIPT_DIR, 'arm-session-start.mjs');
 const TURN_COUNT_SCRIPT = path.join(SCRIPT_DIR, 'arm-turn-count.mjs');
-// The trimmed, hooks-only DoD engine (plugins/dod-lite) — mandatory on every run, injected via
+// The trimmed, hooks-only DoD auditor (plugins/dod-lite) — mandatory on every run, injected via
 // --plugin-dir the same way a previous-version baseline's worktree is, never via env.json/
-// enabledPlugins. Not listed in marketplace.json; not independently installable. See
-// docs/dod-contract.md.
+// enabledPlugins. It is a separate plugin and must stay one: an arm has to load the auditor and
+// NOTHING else, and folding it into ab-bench would mean enabling ab-bench's own skills inside
+// the very sessions being measured. Registered in marketplace.json so it is cached as a sibling
+// and this path resolves from a clone AND from an install. See docs/dod-contract.md.
 const DOD_LITE_DIR = path.resolve(SCRIPT_DIR, '..', '..', '..', '..', 'dod-lite');
 const ARMS = ['control', 'test'];
 const OPENING_PROMPT =
@@ -75,6 +77,26 @@ const OPENING_PROMPT =
 function fail(msg) {
   console.error(`[ab-bench] ERROR: ${msg}`);
   process.exit(1);
+}
+
+// A missing engine launches two arms with no DoD instrumentation at all — and downstream,
+// nothing can tell that apart from a run where every check happened to pass. This was the real
+// behaviour of every marketplace install while dod-lite went unregistered: the four levels up
+// land outside ab-bench's own plugin root, and files outside a plugin root are not copied into
+// the plugin cache. Refuse to launch instead. A measurement harness running without its
+// instrument is worse than one that did not run at all.
+function assertDodEngine() {
+  const hook = path.join(DOD_LITE_DIR, 'hooks', 'dod-check.mjs');
+  if (fs.existsSync(hook)) return;
+  fail(
+    `DoD audit engine not found at ${DOD_LITE_DIR}\n` +
+      `  (looked for ${hook})\n` +
+      '  Both arms are instrumented by plugins/dod-lite. Without it this run would record no DoD\n' +
+      '  evidence at all, which is indistinguishable later from every check passing.\n' +
+      '  If ab-bench was installed from a marketplace, check that dod-lite is registered in the\n' +
+      '  same marketplace.json so it gets cached alongside — an installed plugin cannot reach\n' +
+      '  files outside its own directory. No arms were launched.',
+  );
 }
 
 function parseArgs(argv) {
@@ -473,6 +495,8 @@ function spawnTerminal(title, scriptFile, host) {
 
 function main() {
   const { configRoot, testenvRoot, run, dryRun, noSpawn } = parseArgs(process.argv);
+  // Before anything else: no instrument, no run.
+  assertDodEngine();
   const env = loadEnv(configRoot);
   const lineage = lineageFromConfigRoot(configRoot);
   const runDir = findRun(testenvRoot, run);

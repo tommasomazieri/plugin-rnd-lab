@@ -14,8 +14,8 @@ import {
   runScriptCheck,
   validateCheckerModel,
 } from '../hooks/dod-check.mjs';
-import { loadRunners, readAnswers, truncate } from '../hooks/lib.mjs';
-import { makeWorkspace, cleanupAll, writeCheck, writeScriptCheck, writeMeta, writeAnswer } from './helpers.mjs';
+import { loadRunners, truncate } from '../hooks/lib.mjs';
+import { makeWorkspace, cleanupAll, writeCheck, writeScriptCheck, writeMeta } from './helpers.mjs';
 
 test.after(cleanupAll);
 
@@ -159,17 +159,6 @@ test('loadRunners: config.json overrides merge onto defaults, malformed config d
   fs.writeFileSync(path.join(cwd, '.dod', 'config.json'), '{ not json');
   const runners = await loadRunners(cwd);
   assert.equal(runners['.mjs'], 'node', 'a malformed config must not take the runner table down');
-});
-
-test('readAnswers: reads valid files, ignores malformed ones, tolerates a missing dir', async () => {
-  const cwd = makeWorkspace();
-  assert.deepEqual(await readAnswers(cwd), {}, 'no .dod-answers/ is not an error');
-
-  writeAnswer(cwd, 'ok', { result: 'pass', note: '', answered_at: 'now' });
-  fs.writeFileSync(path.join(cwd, '.dod-answers', 'broken.json'), '{ nope');
-  const answers = await readAnswers(cwd);
-  assert.equal(answers.ok.result, 'pass');
-  assert.ok(!('broken' in answers), 'a malformed answer file is skipped, not thrown');
 });
 
 test('truncate: bounds output and marks it', () => {

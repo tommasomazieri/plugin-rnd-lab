@@ -1,6 +1,6 @@
-// The prompt tier, the human tier, persistence, and the gate. These are the paths that
-// produced the reported "checkers don't work" behaviour, so each defect gets a named
-// regression test rather than a general smoke test.
+// The prompt tier, persistence, and the silence contract. These are the paths that
+// produced the reported "checkers don't work" behaviour and the reported experiment
+// contamination, so each defect gets a named regression test rather than a smoke test.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,8 +13,6 @@ import {
   runPromptCheck,
   runWithConcurrency,
   makePersister,
-  buildHumanPendingReason,
-  buildFailureReason,
 } from '../hooks/dod-check.mjs';
 import { readSession } from '../hooks/lib.mjs';
 import {
@@ -25,7 +23,6 @@ import {
   writeScriptCheck,
   writeSessionFile,
   readSessionFile,
-  writeAnswer,
   writeConfig,
   stubClaude,
   stubMissingClaude,
@@ -158,80 +155,87 @@ test('prompt tier: exhausted budget records error and never blocks', async () =>
   assert.match(r.output, /budget/);
 });
 
-test('gate: prompt tier is SKIPPED when a script check is red and the gate is on', async () => {
+// THE test. Everything else in this workstream exists to make this property true, so
+// it is asserted directly, over every combination of verdicts that used to produce a
+// different stdout. A regression here silently re-falsifies every future run.
+test('SILENCE: the hook writes nothing to stdout, whatever the checks say', async () => {
+  const cases = [
+    ['all passing', 0, { pass: true, reason: 'done' }],
+    ['script red', 1, { pass: true, reason: 'done' }],
+    ['prompt red', 0, { pass: false, reason: 'not done' }],
+    ['both red', 1, { pass: false, reason: 'not done' }],
+  ];
+  for (const [name, scriptExit, verdict] of cases) {
+    const cwd = makeWorkspace();
+    const restore = stubClaude(verdictStub(verdict));
+    try {
+      writeScriptCheck(cwd, 'scripted', scriptExit);
+      writeCheck(cwd, 'graded.md', '---\ntype: prompt\n---\nq');
+      writeSessionFile(cwd, 's', ['scripted', 'graded']);
+      const out = await runHook(cwd, 's');
+
+      assert.equal(out.stdout, '', `${name}: a Stop hook's stdout is the control channel`);
+      assert.equal(out.json, null, `${name}: nothing parseable was emitted`);
+      assert.equal(out.code, 0, `${name}: must exit 0`);
+
+      // ...and it still did the work. Silence must mean "observed and recorded",
+      // never "gave up early".
+      const session = readSessionFile(cwd, 's');
+      assert.equal(session.state.scripted.last_result, scriptExit === 0 ? 'pass' : 'fail', name);
+      assert.equal(session.state.graded.last_result, verdict.pass ? 'pass' : 'fail', name);
+    } finally { restore(); }
+  }
+});
+
+test('SILENCE: no failing check output can reach the session that produced it', async () => {
   const cwd = makeWorkspace();
-  const restore = stubClaude(verdictStub({ pass: true }));
+  const secret = 'CANARY_ffff_THIS_MUST_NOT_REACH_THE_ARM';
+  const restore = stubClaude(verdictStub({ pass: false, reason: secret }));
   try {
-    writeScriptCheck(cwd, 'red', 1);
+    // Both tiers emit the canary: the script check prints it, the grader returns it.
+    writeCheck(cwd, 'loud.js', `console.log(${JSON.stringify(secret)}); process.exit(1);`);
     writeCheck(cwd, 'graded.md', '---\ntype: prompt\n---\nq');
-    writeConfig(cwd, { prompt_tier_gate: true });
-    writeSessionFile(cwd, 'sess-gate-on', ['red', 'graded']);
-    await runHook(cwd, 'sess-gate-on');
-    const session = readSessionFile(cwd, 'sess-gate-on');
-    assert.equal(session.state.red.last_result, 'fail');
-    assert.ok(!session.state.graded, 'this is the documented gate behaviour we are turning OFF by default');
+    writeSessionFile(cwd, 's', ['loud', 'graded']);
+    const out = await runHook(cwd, 's');
+
+    assert.ok(!out.stdout.includes(secret), 'check output leaked into the control channel');
+    assert.equal(out.stdout, '');
+    // It IS recorded — the point is that analyze can read it and the arm cannot.
+    const session = readSessionFile(cwd, 's');
+    assert.match(session.state.loud.last_output, new RegExp(secret));
   } finally { restore(); }
 });
 
-test('gate: prompt tier RUNS alongside a red script check when the gate is off', async () => {
-  // The regression test for the reported symptom. ab-bench scaffolds
-  // prompt_tier_gate:false precisely so a red script check cannot silently cost the
-  // whole AI-graded tier for the run.
+test('no gate: both tiers run every turn, even with a red script check', async () => {
+  // The old prompt_tier_gate skipped the graded tier whenever a script check was red —
+  // the normal mid-run state — so the graded tier silently never ran. The gate is gone;
+  // a leftover `prompt_tier_gate: true` in a config must no longer do anything.
   const cwd = makeWorkspace();
   const restore = stubClaude(verdictStub({ pass: false, reason: 'not done' }));
   try {
     writeScriptCheck(cwd, 'red', 1);
     writeCheck(cwd, 'graded.md', '---\ntype: prompt\n---\nq');
-    writeConfig(cwd, { prompt_tier_gate: false });
-    writeSessionFile(cwd, 'sess-gate-off', ['red', 'graded']);
-    const out = await runHook(cwd, 'sess-gate-off');
-    const session = readSessionFile(cwd, 'sess-gate-off');
+    writeConfig(cwd, { prompt_tier_gate: true });
+    writeSessionFile(cwd, 'sess-gate-ignored', ['red', 'graded']);
+    await runHook(cwd, 'sess-gate-ignored');
+    const session = readSessionFile(cwd, 'sess-gate-ignored');
     assert.equal(session.state.red.last_result, 'fail');
-    assert.equal(session.state.graded.last_result, 'fail', 'the prompt check must have been graded');
+    assert.equal(session.state.graded.last_result, 'fail', 'the graded tier must have run anyway');
     assert.equal(session.state.graded.tier, 'prompt');
-    assert.equal(out.json.decision, 'block');
   } finally { restore(); }
 });
 
-test('human tier: the block instruction points at .dod-answers, never at .dod', () => {
-  const cwd = path.join('C:', 'ws');
-  const reason = buildHumanPendingReason(['taste'], { taste: { body: 'Does it look right?' } }, cwd);
-  assert.match(reason, /\.dod-answers/);
-  assert.match(reason, /Does it look right\?/);
-  assert.ok(
-    !/Edit .*\.dod[\\/]sessions/.test(reason),
-    'the old instruction told the arm to edit a path the harness denies it',
-  );
-  assert.match(reason, /Do NOT edit anything under \.dod\//);
-});
-
-test('human tier: an answer file satisfies the check and unblocks the arm', async () => {
+test('human tier: a leftover human check is recorded as an error, not silently dropped', async () => {
   const cwd = makeWorkspace();
   writeCheck(cwd, 'taste.md', '---\ntype: human\n---\nDoes it look right?');
   writeSessionFile(cwd, 'sess-human', ['taste']);
 
-  const blocked = await runHook(cwd, 'sess-human');
-  assert.equal(blocked.json.decision, 'block', 'unanswered human check must block');
-
-  writeAnswer(cwd, 'taste', { result: 'pass', note: 'looks good', answered_at: new Date().toISOString() });
-  const unblocked = await runHook(cwd, 'sess-human');
-  assert.ok(!unblocked.json?.decision, 'answered human check must stop blocking');
+  const out = await runHook(cwd, 'sess-human');
+  assert.equal(out.stdout, '', 'the tier that used to block is the one that must be quietest');
 
   const session = readSessionFile(cwd, 'sess-human');
-  assert.equal(session.state.taste.last_result, 'pass');
-  assert.equal(session.state.taste.answer_source, 'arm-reported');
-  assert.equal(session.state.taste.last_output, 'looks good');
-});
-
-test('human tier: waived stops blocking, fail keeps blocking', async () => {
-  for (const [result, shouldBlock] of [['waived', false], ['fail', true]]) {
-    const cwd = makeWorkspace();
-    writeCheck(cwd, 'q.md', '---\ntype: human\n---\nq');
-    writeSessionFile(cwd, 's', ['q']);
-    writeAnswer(cwd, 'q', { result, note: 'n', answered_at: 'now' });
-    const out = await runHook(cwd, 's');
-    assert.equal(Boolean(out.json?.decision), shouldBlock, `result=${result}`);
-  }
+  assert.equal(session.state.taste.last_result, 'error', 'ungraded, and visibly so');
+  assert.match(session.state.taste.last_output, /no longer supported/);
 });
 
 test('persistence: results land as they arrive, not in one write at the end', async () => {
@@ -293,23 +297,52 @@ test('fail-open: no session file at all is a silent no-op', async () => {
   assert.equal(out.stdout.trim(), '');
 });
 
-test('errors are reported but never block', async () => {
+test('errors surface on stderr and in the session file, never on stdout', async () => {
   const cwd = makeWorkspace();
   writeCheck(cwd, 'dup.md', '---\ntype: prompt\n---\nq');
   writeScriptCheck(cwd, 'dup', 0);
   writeSessionFile(cwd, 's', ['dup']);
   const out = await runHook(cwd, 's');
-  assert.ok(!out.json?.decision, 'an ambiguous check is harness breakage, not a failed criterion');
-  assert.match(out.json.systemMessage, /could not be evaluated/);
+  assert.equal(out.stdout, '', 'harness breakage is still not something the arm may hear');
+  assert.match(out.stderr, /could not be evaluated/, 'but the operator must be able to see it');
   assert.equal(readSessionFile(cwd, 's').state.dup.last_result, 'error');
 });
 
-test('buildFailureReason: names every failing check and its output', () => {
-  const reason = buildFailureReason('script', [
-    { id: 'one', output: 'first problem' },
-    { id: 'two', output: 'second problem' },
-  ]);
-  assert.match(reason, /2 script DoD check\(s\) failing/);
-  assert.match(reason, /"one": first problem/);
-  assert.match(reason, /"two": second problem/);
+test('per-turn audit: each stop appends a full record and never rewrites an earlier one', async () => {
+  const cwd = makeWorkspace();
+  const restore = stubClaude(verdictStub({ pass: false, reason: 'first pass was wrong' }));
+  try {
+    writeScriptCheck(cwd, 'scripted', 1);
+    writeCheck(cwd, 'graded.md', '---\ntype: prompt\n---\nq');
+    writeSessionFile(cwd, 's', ['scripted', 'graded']);
+    await runHook(cwd, 's');
+
+    const afterTurn1 = readSessionFile(cwd, 's');
+    assert.equal(afterTurn1.history.length, 1);
+    assert.equal(afterTurn1.history[0].turn, 1);
+    const t1 = afterTurn1.history[0].results.find((r) => r.check === 'graded');
+    assert.equal(t1.result, 'fail');
+    assert.match(t1.output, /first pass was wrong/, 'full output, not a bare verdict');
+    assert.equal(t1.tier, 'prompt');
+  } finally { restore(); }
+
+  // Turn two: the work improved. The turn-one record must survive verbatim, because
+  // the whole point of the series is reading improvement and regression across turns.
+  const restore2 = stubClaude(verdictStub({ pass: true, reason: 'fixed now' }));
+  try {
+    writeScriptCheck(cwd, 'scripted', 0);
+    await runHook(cwd, 's');
+    const afterTurn2 = readSessionFile(cwd, 's');
+
+    assert.equal(afterTurn2.history.length, 2, 'appended, not overwritten');
+    assert.equal(afterTurn2.history[1].turn, 2);
+    assert.match(
+      afterTurn2.history[0].results.find((r) => r.check === 'graded').output,
+      /first pass was wrong/,
+      "turn 1's record must be byte-identical after turn 2 ran",
+    );
+    assert.equal(afterTurn2.history[0].results.find((r) => r.check === 'scripted').result, 'fail');
+    assert.equal(afterTurn2.history[1].results.find((r) => r.check === 'scripted').result, 'pass');
+    assert.equal(afterTurn2.state.scripted.last_result, 'pass', 'state tracks only the latest');
+  } finally { restore2(); }
 });

@@ -1,25 +1,47 @@
 #!/usr/bin/env node
-// Stop hook (matcher "*"). The core DoD checker.
+// Stop hook (matcher "*"). The DoD auditor.
 //
-// Three tiers, gated in order — a later tier only runs if every earlier tier
-// currently passes, so a failing script check never triggers a paid prompt-check
-// subprocess or interrupts the user with a HITL question for nothing:
-//   1. script  — always run, every turn (a passing check last turn can regress
-//                this turn), local subprocess, exit code is the verdict.
-//   2. prompt  — spawns headless `claude -p` subprocesses under
-//                --permission-mode plan (generic read-only guarantee, works for
-//                project-specific MCP tools too, not just builtins). Run in
-//                parallel: sequential runs blew the Stop-hook timeout budget.
-//   3. human   — needs a live user; the hook can't ask directly, so it blocks
-//                with explicit instructions for Claude to run AskUserQuestion and
-//                write the answer to .dod-answers/<id>.json, which this hook merges
-//                on the next stop. The answer goes there rather than into the session
-//                file because an ab-bench arm is denied writes under .dod/ — the old
-//                "edit the session file yourself" instruction was impossible to obey.
+// THIS HOOK IS AN INSTRUMENT, NOT A CONTROL LOOP. It observes the session it runs
+// in and records what it saw. It never speaks to that session — no `decision`, no
+// `reason`, no `systemMessage`, nothing on stdout at all. That is the single
+// invariant this file exists to uphold, and it is load-bearing for the experiment:
 //
-// The gate can be turned off per-project with `"prompt_tier_gate": false` in
-// .dod/config.json — an A/B harness wants every quality dimension graded at the
-// final state even when a script check is red, and pays for it knowingly.
+//   - ab-bench injects this into BOTH arms identically. Feedback would pull both
+//     arms toward the same output and mask the very difference being measured.
+//   - Real vanilla Claude Code has no such feedback. Control-with-nudges is not
+//     control, so any result obtained that way does not generalise.
+//   - A plugin under test may ship its own Stop-event checks. Those are intrinsic
+//     to the treatment and must be the ONLY checks an arm can hear.
+//
+// Its predecessor blocked on failure and shipped failing-check output back into the
+// arm, which is correct for a DoD engine driving a job to completion and wrong for
+// one measuring whether the agent got there unaided.
+//
+// Two tiers, both run every turn, ungated:
+//   1. script — local subprocess, exit code is the verdict. Costs nothing, so it
+//               always runs.
+//   2. prompt — headless `claude -p` subprocesses under --permission-mode plan
+//               (generic read-only guarantee, covers project MCP tools too, not
+//               just builtins). Run in parallel: sequential runs blew the budget.
+//
+// There is no gate between them and no human tier. The old `prompt_tier_gate`
+// skipped the prompt tier whenever a script check was red — which mid-run is the
+// normal state — so the graded tier silently never ran. Both tiers now run every
+// turn unconditionally; prompt-tier COST is a planning concern, handled by
+// /ab-bench:plan being sparing about how many prompt checks a run declares, since
+// each one now bills once per turn per arm.
+//
+// The human tier is gone entirely. The human is the gate: a session ends when it
+// ends, and the user either reports the job undone at /ab-bench:analyze or feeds
+// back and grants another turn. The old tier blocked with instructions telling the
+// arm to call AskUserQuestion — which manufactured the very autonomy signal the
+// harness measures.
+//
+// PER-TURN AUDIT, APPEND-NEVER-OVERWRITE. Every stop appends a complete record of
+// that turn to `history`, with full output and evidence, not just a verdict. Earlier
+// turns are never rewritten. That series is what makes improvement vs regression
+// across turns visible, and what lets /ab-bench:analyze separate a plugin problem
+// from bad user prompts in between turns.
 //
 // Two invariants exist because run-002 lost an entire prompt tier to a hook kill:
 //   - RESULTS ARE PERSISTED AS THEY LAND, not in one write at the end. A hook
@@ -28,30 +50,25 @@
 //     Code's timeout can kill it, so the final write always happens.
 //
 // Infrastructure failures (spawn error, subprocess timeout, unparseable verdict,
-// exhausted budget) record `error`, NOT `fail`, and never block. A checker bug
-// must not change what an arm does — that would contaminate the experiment —
-// but it must stay visible in the session file for /ab-bench:analyze to flag.
-//
-// No custom stall/cooldown counter: Claude Code's native cap (stops issuing
-// further Stop blocks after 8 consecutive ones) is the safety net.
+// exhausted budget) record `error`, NOT `fail`. A checker bug must stay
+// distinguishable from a genuine failure when /ab-bench:analyze reads the series.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// Note the absence of printJSON: this hook has nothing to say. Importing it back
+// is the first step of reintroducing the contamination this file was rebuilt to remove.
 import {
   isRecursionGuardActive,
   readStdinJSON,
   readSession,
   writeSession,
   checksDir,
-  answerFilePath,
-  readAnswers,
   loadConfig,
   loadRunners,
   truncate,
   runFailOpen,
-  printJSON,
 } from './lib.mjs';
 
 const SCRIPT_TIMEOUT_MS = 30_000;
@@ -450,41 +467,35 @@ export function makePersister(cwd, sessionId, session) {
         ...(result.confidence ? { confidence: result.confidence } : {}),
         ...(result.model ? { grader_model: result.model } : {}),
         ...(result.retried ? { retried: true } : {}),
-        ...(result.answer_source ? { answer_source: result.answer_source } : {}),
       };
       return flushOne();
     },
+    // The per-turn audit record. Appends a COMPLETE account of this turn — full
+    // output, evidence, grader model — never a bare verdict, and never a rewrite of
+    // an earlier turn. `state` above is a latest-value convenience only; THIS array
+    // is the record, and it is what makes improvement-vs-regression across turns
+    // readable, and what lets analyze tell a plugin problem apart from a bad user
+    // prompt in between turns.
     finalize(results) {
       session.history.push({
+        turn: session.history.length + 1,
         at: new Date().toISOString(),
-        results: results.map((r) => ({ check: r.id, result: r.result })),
+        // `check` and `result` keep their old names and positions: consumers that
+        // only ever read a verdict keep working, everything else is additive.
+        results: results.map((r) => ({
+          check: r.id,
+          result: r.result,
+          tier: r.tier,
+          output: truncate(r.output),
+          ...(r.evidence ? { evidence: r.evidence, grounded: r.grounded } : {}),
+          ...(r.confidence ? { confidence: r.confidence } : {}),
+          ...(r.model ? { grader_model: r.model } : {}),
+          ...(r.retried ? { retried: true } : {}),
+        })),
       });
       return flushOne();
     },
   };
-}
-
-export function buildFailureReason(label, failures) {
-  const items = failures.map((f) => `- "${f.id}": ${truncate(f.output, 800)}`).join('\n');
-  return `dod-lite: ${failures.length} ${label} DoD check(s) failing:\n${items}\n\nAddress these before stopping.`;
-}
-
-// Directs the arm to .dod-answers/, NOT to the session file. The session file lives
-// under .dod/, which every ab-bench arm is denied write access to — the old instruction
-// asked for something the harness structurally forbade, so a human check could never be
-// satisfied and the arm looped until Claude Code's 8-stop cap.
-export function buildHumanPendingReason(pendingIds, defs, cwd) {
-  const items = pendingIds
-    .map((id) => `- "${id}": ${defs[id]?.body || '(no question text found)'}\n    write to: ${answerFilePath(cwd, id)}`)
-    .join('\n');
-  return `dod-lite: ${pendingIds.length} human-judgement DoD check(s) need your input before this turn can end:\n${items}\n\n` +
-    'For EACH item above, ask the user via AskUserQuestion with exactly these three options: ' +
-    '"Done", "Not done" (collect a free-text note on what is missing), "Stop anyway, finish later". ' +
-    'Then Write the answer file shown for that check, containing exactly:\n' +
-    '  {"result": "pass"|"fail"|"waived", "note": "<their note, or empty>", "answered_at": "<ISO timestamp>"}\n' +
-    'where pass = Done, fail = Not done, waived = Stop anyway. Do NOT edit anything under .dod/ — ' +
-    'it is read-only to you by design, and writing the answer file is how your answer is recorded. ' +
-    'Do not write an answer file without actually asking the user and recording their real answer.';
 }
 
 async function main() {
@@ -502,7 +513,6 @@ async function main() {
   const budgetMs = Number.isFinite(config.hook_budget_ms) ? config.hook_budget_ms : HOOK_BUDGET_MS;
   const promptTimeoutMs = Number.isFinite(config.prompt_timeout_ms) ? config.prompt_timeout_ms : PROMPT_TIMEOUT_MS;
   const scriptTimeoutMs = Number.isFinite(config.script_timeout_ms) ? config.script_timeout_ms : SCRIPT_TIMEOUT_MS;
-  const gateOnScripts = config.prompt_tier_gate !== false;
   const deadline = startedAt + budgetMs;
 
   const defs = await loadCheckDefs(cwd, session.checks);
@@ -516,20 +526,21 @@ async function main() {
   const persister = makePersister(cwd, sessionId, session);
   const results = [];
 
-  // Human answers the arm wrote since the last stop, merged before anything else runs so
-  // a check answered this turn does not immediately block again.
-  const answers = await readAnswers(cwd);
+  // The human tier is gone. A leftover `type: human` check is recorded as an error
+  // rather than silently dropped, so a run authored against the old contract surfaces
+  // as ungraded at analyze time instead of quietly counting as fine.
   for (const id of humanIds) {
-    const a = answers[id];
-    if (!a || !['pass', 'fail', 'waived'].includes(a.result)) continue;
-    if (session.state[id]?.last_result === a.result && session.state[id]?.answer_source === 'arm-reported') continue;
-    await persister.record({
+    const r = {
       id,
       tier: 'human',
-      result: a.result,
-      output: typeof a.note === 'string' ? a.note : '',
-      answer_source: 'arm-reported',
-    });
+      result: 'error',
+      output:
+        'human-tier checks are no longer supported: these checks observe, they never ask the ' +
+        'session for anything. Re-author as a script or prompt check, or drop it and judge it ' +
+        'yourself at /ab-bench:analyze.',
+    };
+    results.push(r);
+    await persister.record(r);
   }
 
   for (const id of scriptIds) {
@@ -537,10 +548,12 @@ async function main() {
     results.push(r);
     await persister.record(r);
   }
-  const scriptFailures = results.filter((r) => r.tier === 'script' && r.result === 'fail');
 
-  const promptTierRuns = promptIds.length > 0 && (!gateOnScripts || scriptFailures.length === 0);
-  if (promptTierRuns) {
+  // Ungated on purpose, so the per-turn series has no holes: every declared dimension
+  // is graded every turn regardless of what the script tier said. The old gate skipped
+  // this tier whenever a script check was red — the normal mid-run state — which is how
+  // the graded tier silently never ran.
+  if (promptIds.length > 0) {
     const systemPrompt = await loadSystemPrompt();
     await runWithConcurrency(promptIds, PROMPT_CONCURRENCY, async (id) => {
       const remaining = deadline - Date.now();
@@ -549,37 +562,17 @@ async function main() {
       await persister.record(r);
     });
   }
-  const promptFailures = results.filter((r) => r.tier === 'prompt' && r.result === 'fail');
-
-  let blockReason = null;
-  if (scriptFailures.length > 0) {
-    blockReason = buildFailureReason('script', scriptFailures);
-  } else if (promptFailures.length > 0) {
-    blockReason = buildFailureReason('AI-graded', promptFailures);
-  } else {
-    const pendingHuman = humanIds.filter((id) => {
-      const prior = session.state[id]?.last_result;
-      return prior !== 'pass' && prior !== 'waived';
-    });
-    if (pendingHuman.length > 0) {
-      blockReason = buildHumanPendingReason(pendingHuman, defs, cwd);
-    }
-  }
 
   await persister.finalize(results);
 
-  // Never blocks — an infrastructure failure must not alter what the arm does.
+  // Diagnostics go to stderr, never stdout. A Stop hook's stdout IS the control
+  // channel, so the only safe amount to write there is none — see this file's header.
+  // Anything the run needs to know is in the session file for /ab-bench:analyze.
   const errors = results.filter((r) => r.result === 'error');
-  const errorNote = errors.length > 0
-    ? ` ${errors.length} check(s) could not be evaluated (recorded as "error", not blocking): ${errors.map((e) => e.id).join(', ')}.`
-    : '';
-
-  if (blockReason) {
-    printJSON({ decision: 'block', reason: blockReason + (errorNote ? `\n\ndod-lite:${errorNote}` : '') });
-  } else if (errors.length > 0) {
-    printJSON({ systemMessage: `dod-lite: no failing Definition-of-Done checks.${errorNote}` });
-  } else {
-    printJSON({ systemMessage: 'dod-lite: all Definition-of-Done checks passed.' });
+  if (errors.length > 0) {
+    console.error(
+      `dod-lite: ${errors.length} check(s) could not be evaluated: ${errors.map((e) => e.id).join(', ')}`,
+    );
   }
 }
 

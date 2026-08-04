@@ -1,8 +1,8 @@
 {
   "name": "dod-lite",
   "displayName": "dod-lite",
-  "description": "Internal, hooks-only Definition-of-Done enforcement engine for ab-bench's arm sessions: runs script/AI-graded/human-judged checks (defined externally by ab-bench, never designed in-session) at Stop. Not for standalone/manual use.",
-  "version": "0.2.0",
+  "description": "Internal, hooks-only Definition-of-Done AUDITOR for ab-bench's arm sessions: runs script and AI-graded checks (defined externally by ab-bench, never designed in-session) at every Stop and records a per-turn report. Observational by construction — it never speaks to the session it measures. Not for standalone/manual use.",
+  "version": "0.3.0",
   "author": {
     "name": "Tommaso Mazieri"
   },

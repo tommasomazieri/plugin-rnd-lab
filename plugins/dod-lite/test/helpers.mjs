@@ -58,12 +58,6 @@ export function readSessionFile(cwd, sessionId) {
   return JSON.parse(fs.readFileSync(path.join(cwd, '.dod', 'sessions', `${sessionId}.json`), 'utf8'));
 }
 
-export function writeAnswer(cwd, id, answer) {
-  const dir = path.join(cwd, '.dod-answers');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(answer, null, 2));
-}
-
 export function writeConfig(cwd, config) {
   fs.writeFileSync(path.join(cwd, '.dod', 'config.json'), JSON.stringify(config, null, 2));
 }

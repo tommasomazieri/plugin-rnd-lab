@@ -1,5 +1,5 @@
 {
-  "description": "dod-lite (ab-bench arm engine): hooks-only tiered Definition-of-Done checker, enforced at Stop. No skills/commands — checks are authored externally by ab-bench, never designed in-session.",
+  "description": "dod-lite (ab-bench arm instrument): hooks-only Definition-of-Done auditor. Evaluates script and prompt checks at every Stop, records a per-turn report, and says NOTHING to the session it observes — no decision, no reason, no stdout. Checks are authored externally by ab-bench, never designed in-session.",
   "hooks": {
     "Stop": [
       {
