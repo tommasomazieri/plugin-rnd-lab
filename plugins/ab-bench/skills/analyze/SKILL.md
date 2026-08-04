@@ -158,8 +158,11 @@ Its task prompt must contain absolute paths to:
 - both `analysis/quality-<arm>.json` from step 3b (note if the rubric didn't exist)
 - both raw transcripts (from manifest.json — last session segment per arm; the agent uses
   these only to expand specific `L<n>` anchors)
-- both `testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent) and the
-  `workspace/.dod-answers/` folder for each arm if any human check was answered
+- both `testenvRoot/.dod/sessions/<session-id>.json` paths (note if absent). Tell the agent to
+  read `history` as a per-turn trajectory, not a final score — it is append-only, one complete
+  entry per turn, so a check that regressed `pass` → `fail` mid-run is visible there and nowhere else
+- `analysis/prompt-parity.json` and `analysis/delivery.json` — both bound what may be attributed
+  to the plugin at all, so the agent must read them before ranking anything
 - `runs/run-NNN/dod-checks.json` path (note if absent), `configRoot/env.json` path
 - `mandateFile` path (note if absent — legacy experiment; read `manifest.json`'s
   `mandate`/`env` fields to confirm you're pointing at the right one if it's ambiguous)

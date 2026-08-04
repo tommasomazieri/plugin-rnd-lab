@@ -75,15 +75,17 @@ function writeLedgerHeader(testenvDir, displayName, pluginRef) {
   fs.writeFileSync(p, content);
 }
 
-// dod-lite defaults prompt_tier_gate to TRUE (skip AI grading whenever a script check is
-// red), which is right for a normal project and wrong for an A/B harness: mid-run a
-// script check is red almost by definition, so the whole AI-graded tier silently never
-// ran. Every experiment gets the gate turned off explicitly at scaffold time — an A/B
-// wants every quality dimension graded at the final state and knowingly pays for it.
+// Seeded so an operator has a file to tune (runners, timeouts) without inventing its shape.
+//
+// There is deliberately no tier gate here any more. `prompt_tier_gate` used to skip AI grading
+// whenever a script check was red — which mid-run is the normal state, so the whole AI-graded
+// tier silently never ran. Scaffolding it to `false` fixed the symptom but left the footgun
+// loaded; the gate was removed from the engine outright, because the per-turn audit series must
+// have no holes in it. A leftover key in an existing config is inert.
 function writeDodConfig(testenvDir) {
   const p = path.join(testenvDir, '.dod', 'config.json');
   if (fs.existsSync(p)) return; // never clobber an operator's tuning
-  fs.writeFileSync(p, `${JSON.stringify({ prompt_tier_gate: false }, null, 2)}\n`);
+  fs.writeFileSync(p, `${JSON.stringify({ runners: {} }, null, 2)}\n`);
 }
 
 function scaffoldTestenv(testenvDir, displayName, pluginRef) {
