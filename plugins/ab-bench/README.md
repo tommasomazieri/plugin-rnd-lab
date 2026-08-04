@@ -66,7 +66,7 @@ ${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/   ← the 
   .dod/                dod-lite's real layout, SHARED across runs via a junction per arm:
                          checks/    real check files authored by /ab-bench:plan
                          sessions/  per-session trackers, owned by dod-lite, seeded by our hook
-                         config.json  written at scaffold time with prompt_tier_gate: false
+                         config.json  written at scaffold time (runners + timeouts)
   baselines/<id>/<ref>/  per-artifact immutable snapshots — a git worktree at a pinned ref or
                        HEAD sha, or `_wt-<hash>/` for a content-hashed copy of a dirty tree.
                        Cached and reused by every later run resolving the same identity.
@@ -79,10 +79,10 @@ ${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/   ← the 
                        mandate/env lineage + arms.<arm>.artifacts[] (full resolved pins)
     .launch/          composed settings/mcp/batch files + parity-report.json + hooks.log
                        + prepare-<arm>-<id>.log for any artifact declaring a build step
-    control/  test/   twin workspaces (TASK.md, .claude/settings.json hook, .dod junction,
-                       .dod-answers/ for human-tier check answers)
-    analysis/         metrics-*.json, comparison.json, quality-<arm>.json,
-                       digest-<arm>.md + digest-<arm>-sub-*.md, report.md
+    control/  test/   twin workspaces (TASK.md, .claude/settings.json hook, .dod junction).
+                       An arm has no write channel into DoD state — it is observed, not consulted
+    analysis/         metrics-*.json, comparison.json, quality-<arm>.json, prompt-parity.json,
+                       delivery.json, digest-<arm>.md + digest-<arm>-sub-*.md, report.md
 ```
 
 A SessionStart hook (`hooks/session-context.mjs`) fires in every session started from inside a
@@ -173,9 +173,10 @@ four** — there is no aggregate score, because a single number would let a real
 a bigger win. The five pillars: `quality` (higher is better), `input_tokens`, `output_tokens`,
 `turns`, `autonomy` (lower is better on all four).
 
-`autonomy` counts only *elective* HITL — `AskUserQuestion` calls plus unprompted user turns,
-minus human-tier DoD answers the harness itself forced. Penalising an arm for the experiment's
-own instrumentation would make the pillar measure the harness instead of the plugin.
+`autonomy` counts only *elective* HITL — `AskUserQuestion` calls plus unprompted user turns.
+The harness no longer forces any: the DoD auditor never speaks to an arm, so there is nothing to
+subtract. (The `hitl_harness` correction survives as a legacy reader so older runs, fired when a
+human tier existed, still compute the same numbers they did then.)
 
 `quality` is scored against `quality-rubric.md`'s versioned anchored scale, never against DoD
 pass rates — those are per-task and not comparable across runs. Bumping `rubric_version` forks
@@ -216,7 +217,15 @@ every run:
 
 ab-bench degrades gracefully when no `dod-checks.json` exists for a run — analysis then leans on
 metrics + human verdict only. That's the only way to skip DoD tracking now; the engine itself is
-always present.
+always present, and `launch-pair.mjs` refuses to fire if it cannot find it rather than producing
+a run with no instrument.
+
+**The DoD auditor never speaks to an arm.** It evaluates script and prompt checks at every Stop,
+writes a per-turn append-only report, and emits nothing on stdout — no `decision`, no `reason`.
+It is injected into both arms identically, so any feedback would pull them toward the same output
+and mask the difference being measured. The only checks an arm can hear are the plugin-under-
+test's own. Because nothing drives an arm to completion, **the human is the gate**: a session ends
+when you end it, and `/ab-bench:analyze` asks per arm whether it actually delivered.
 
 ## Known gotcha: transcripts silently missing (fixed)
 
