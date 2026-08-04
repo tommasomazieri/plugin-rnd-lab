@@ -97,10 +97,13 @@ function summarizeDodState(session) {
 }
 
 /**
- * Human-answered DoD checks are HARNESS-INDUCED interruptions: the hook blocked and told
- * the arm to ask. They are not the arm choosing to consult a human, so they must not
- * count against the autonomy pillar — otherwise adding a taste check to a run would make
- * both arms look less autonomous for reasons that have nothing to do with either.
+ * LEGACY. Always 0 for runs fired after the DoD engine became observational — the human
+ * tier that produced these no longer exists, precisely because blocking to tell an arm to
+ * call AskUserQuestion manufactured the autonomy signal being measured.
+ *
+ * Kept because runs already on disk have `answer_source: "arm-reported"` entries, and their
+ * autonomy numbers must stay reproducible: those interruptions really were harness-induced,
+ * so subtracting them is still the correct reading of that data.
  */
 export function harnessHitl(dodSession) {
   if (!dodSession) return 0;
@@ -119,6 +122,85 @@ export function electiveHitl(m, dodSession) {
   const asks = m.tool_calls?.AskUserQuestion || 0;
   const unpromptedTurns = Math.max(0, (m.user_bias?.real_user_turns || 0) - 1);
   return Math.max(0, asks + unpromptedTurns - harnessHitl(dodSession));
+}
+
+export function tokenize(text) {
+  return String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+}
+
+/** Jaccard over word sets. Order-insensitive on purpose: the same instruction reworded is a
+ *  smaller divergence than a different instruction, and this only has to rank, not grade. */
+export function similarity(a, b) {
+  const A = new Set(tokenize(a));
+  const B = new Set(tokenize(b));
+  if (A.size === 0 && B.size === 0) return 1;
+  let shared = 0;
+  for (const tok of A) if (B.has(tok)) shared++;
+  return shared / (A.size + B.size - shared);
+}
+
+const DIVERGENCE_THRESHOLD = 0.8;
+
+/**
+ * Prompt parity across arms.
+ *
+ * The DoD auditor no longer drives an arm to completion, so a session ends when it ends and
+ * the operator decides whether to feed back and grant another turn. That makes their
+ * between-turn prompts an uncontrolled independent variable — and there are two arms. Type
+ * different things into each and the delta stops being attributable to the plugin.
+ *
+ * Measured and reported, never enforced. Two live terminals cannot be stopped from diverging,
+ * and unblocking one genuinely stuck arm is worth more than a clean number bought by
+ * pretending that never happens. Same posture as the config parity report next to it.
+ *
+ * Turn 0 is the harness's own opening prompt, identical by construction — if THAT diverged,
+ * the launch is faulty, which is a different problem and is reported as one.
+ */
+export function promptParity(controlMetrics, testMetrics) {
+  const turns = {
+    control: controlMetrics.user_bias?.user_turns || [],
+    test: testMetrics.user_bias?.user_turns || [],
+  };
+  const divergence = [];
+  for (let i = 0; i < Math.max(turns.control.length, turns.test.length); i++) {
+    const c = turns.control[i];
+    const t = turns.test[i];
+    if (!c || !t) {
+      divergence.push({
+        turn: i,
+        similarity: 0,
+        reason: 'one arm has no such turn',
+        control: c ? c.preview : '— (no turn)',
+        test: t ? t.preview : '— (no turn)',
+      });
+      continue;
+    }
+    const s = similarity(c.text ?? c.preview, t.text ?? t.preview);
+    if (s < DIVERGENCE_THRESHOLD) {
+      divergence.push({
+        turn: i,
+        similarity: Number(s.toFixed(2)),
+        reason: 'different text',
+        control: c.preview,
+        test: t.preview,
+      });
+    }
+  }
+
+  const openingDiverged = divergence.some((d) => d.turn === 0);
+  const afterOpening = divergence.filter((d) => d.turn > 0);
+  return {
+    user_turns: { control: turns.control.length, test: turns.test.length },
+    opening: openingDiverged
+      ? 'DIVERGED — both arms are sent the same opening prompt against the same TASK.md, so this is a launch fault, not operator input'
+      : 'identical (task.md)',
+    threshold: DIVERGENCE_THRESHOLD,
+    divergence,
+    verdict:
+      divergence.length === 0
+        ? 'PARITY — every user turn matched across arms; deltas are attributable to the independent variable'
+        : `DIVERGENT — ${afterOpening.length + (openingDiverged ? 1 : 0)} turn(s) differ. Attribution to the plugin is weakened by exactly this much operator input, and any causal claim must account for it.`,
+  };
 }
 
 /**
@@ -312,6 +394,22 @@ export function compareRun(runDir) {
   const c = metrics.control;
   const t = metrics.test;
 
+  // Written as its own file as well as embedded below: the session-comparator is told to
+  // read it before attributing any delta, and a path it can be pointed at is harder to skip
+  // than a nested key.
+  const promptParityReport = promptParity(c, t);
+  fs.writeFileSync(
+    path.join(analysisDir, 'prompt-parity.json'),
+    JSON.stringify(promptParityReport, null, 2),
+  );
+  if (promptParityReport.divergence.length > 0) {
+    flags.push(
+      `PROMPT PARITY: ${promptParityReport.verdict} ` +
+        `(control ${promptParityReport.user_turns.control} user turns, test ${promptParityReport.user_turns.test}). ` +
+        'See analysis/prompt-parity.json — the arms were not given the same instructions after the opening brief.',
+    );
+  }
+
   // parity checks
   const cModels = Object.keys(c.models).sort().join(',');
   const tModels = Object.keys(t.models).sort().join(',');
@@ -433,6 +531,10 @@ export function compareRun(runDir) {
         test: t.compactions.boundaries + t.compactions.compact_summaries,
       },
     },
+    // The operator's own turns are an independent variable now that nothing drives an arm to
+    // completion for it. Counting them was never enough — two arms can have four turns each
+    // and have been told completely different things.
+    prompt_parity: promptParityReport,
     // Paths, not content: the digests are files the session-comparator MUST read. Their
     // warnings are duplicated into parity_flags so nothing depends on the agent opening them
     // — but nothing about WHY a delta happened can be answered without doing so.

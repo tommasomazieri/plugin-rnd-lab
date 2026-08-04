@@ -3,7 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { harnessHitl, electiveHitl, pillarsFor, pinsFromManifest } from '../skills/analyze/scripts/compare-runs.mjs';
+import {
+  harnessHitl,
+  electiveHitl,
+  pillarsFor,
+  pinsFromManifest,
+  promptParity,
+  similarity,
+} from '../skills/analyze/scripts/compare-runs.mjs';
 
 const metrics = (over = {}) => ({
   tokens: { input: 1, output: 2, cache_read: 3, cache_creation: 4 },
@@ -108,4 +115,64 @@ test('pinsFromManifest: a manifest with neither shape reports empty, not a crash
   const out = pinsFromManifest({ arms: {} });
   assert.deepEqual(out.control, []);
   assert.deepEqual(out.test, []);
+});
+
+// Prompt parity. Once the DoD auditor stopped driving arms to completion, the operator's own
+// between-turn prompts became an uncontrolled independent variable across two arms.
+
+const withTurns = (texts) => ({
+  user_bias: {
+    real_user_turns: texts.length,
+    user_turns: texts.map((text) => ({ at: null, chars: text.length, preview: text.slice(0, 80), text })),
+  },
+});
+
+test('similarity: identical is 1, disjoint is 0, reworded lands in between', () => {
+  assert.equal(similarity('fix the failing test', 'fix the failing test'), 1);
+  assert.equal(similarity('alpha beta', 'gamma delta'), 0);
+  assert.equal(similarity('', ''), 1, 'two empty turns are not a divergence');
+  const s = similarity('please fix the failing test', 'fix the failing test now');
+  assert.ok(s > 0 && s < 1, `reworded should be partial, got ${s}`);
+});
+
+test('promptParity: identical turns on both arms is PARITY', () => {
+  const p = promptParity(withTurns(['do the task', 'keep going']), withTurns(['do the task', 'keep going']));
+  assert.deepEqual(p.divergence, []);
+  assert.match(p.verdict, /^PARITY/);
+  assert.equal(p.opening, 'identical (task.md)');
+  assert.deepEqual(p.user_turns, { control: 2, test: 2 });
+});
+
+test('promptParity: a different follow-up is flagged with both sides quoted', () => {
+  const p = promptParity(
+    withTurns(['do the task', 'try a completely different approach instead']),
+    withTurns(['do the task', 'keep going']),
+  );
+  assert.equal(p.divergence.length, 1);
+  assert.equal(p.divergence[0].turn, 1, 'turn 0 matched, so only the follow-up diverged');
+  assert.match(p.verdict, /^DIVERGENT/);
+  assert.match(p.divergence[0].control, /completely different approach/);
+  assert.match(p.divergence[0].test, /keep going/);
+});
+
+test('promptParity: an extra turn on one arm counts as divergence', () => {
+  const p = promptParity(withTurns(['do the task', 'again', 'and again']), withTurns(['do the task']));
+  assert.equal(p.divergence.length, 2, 'both unmatched turns are reported');
+  assert.equal(p.divergence[0].reason, 'one arm has no such turn');
+  assert.equal(p.divergence[0].test, '— (no turn)');
+  assert.match(p.verdict, /^DIVERGENT/);
+});
+
+test('promptParity: a diverged OPENING is a launch fault, reported separately', () => {
+  // Both arms are sent the same opening prompt against the same TASK.md. If turn 0 differs,
+  // the operator is not the cause and saying "you typed different things" would misdirect.
+  const p = promptParity(withTurns(['build a parser']), withTurns(['write documentation']));
+  assert.match(p.opening, /launch fault/);
+  assert.match(p.verdict, /^DIVERGENT/);
+});
+
+test('promptParity: missing user_bias degrades to empty, never throws', () => {
+  const p = promptParity({}, {});
+  assert.deepEqual(p.user_turns, { control: 0, test: 0 });
+  assert.match(p.verdict, /^PARITY/);
 });

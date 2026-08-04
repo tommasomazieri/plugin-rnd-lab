@@ -33,6 +33,35 @@ $ARGUMENTS usually contains it ("test delivered better output because xyz"). If 
 quality verdict, ask ONE question: which arm produced the better output and why (free-form).
 Record it verbatim — it goes to the comparator and into the report as-is.
 
+### 1b. Capture DELIVERY, per arm — this is not the same question as quality
+
+The DoD auditor observes; it never pushes an arm to finish. **The user is the gate**: they end a
+session when they choose, and an arm that stopped with the job half-done looks exactly like one
+that finished. Nothing in the transcript, the manifest, or the DoD state distinguishes them, so
+it has to be asked.
+
+Ask, per arm: **did this arm actually deliver the task?** Not "was it better" — an arm can lose
+on quality and still have delivered, and both arms can fail to deliver, which is itself the
+most useful result a run can produce ("the plugin clearly needs to improve").
+
+Write `analysis/delivery.json`:
+
+```json
+{ "control": { "delivered": true,  "note": "" },
+  "test":    { "delivered": false, "note": "stopped after scaffolding, never wired the handler" } }
+```
+
+Consequences, applied in later steps and stated in the report:
+
+- **Any arm `delivered: false` ⇒ no regression point.** `lab/regressions/points.json` plots
+  comparable completed work; a run where someone gave up is not on that scale and must never
+  join the curve.
+- **Any arm `delivered: false` ⇒ hypothesis outcome is `inconclusive`**, unless the hypothesis
+  under test was itself about delivery. A token saving bought by an arm quitting early is not
+  a win, and `classifyOutcome` sees only deltas — it cannot tell the difference.
+- **Both arms `delivered: false`** is a legitimate, reportable finding about the task or the
+  plugin. Report it as one. Do not stretch for a winner between two failures.
+
 ## 2. Deterministic layer
 
 ```
@@ -59,6 +88,17 @@ score, and tell the user what to fix before re-firing.
 
 Checks reported `pending` or `error` were never graded — say so as a harness defect, never as
 a quality result.
+
+`PROMPT PARITY` does not end the analysis, but it **bounds every causal claim in it**. Read
+`analysis/prompt-parity.json`. Both arms get the same opening brief from `task.md`, and nothing
+guarantees anything after that — since the DoD auditor stopped driving arms to completion, the
+turns the operator types are an uncontrolled independent variable, and there are two arms. A
+`DIVERGENT` verdict means part of the delta is attributable to what was typed, not to the
+plugin. Quote the diverging turns in the report and say what they could account for. Never
+present a plugin attribution as clean over a divergent run.
+
+An `opening` that diverged is a different thing entirely — the harness sends both arms the same
+prompt, so that is a launch fault. Treat it like the run-ending flags above.
 
 `STALE DoD VERDICTS` does not end the analysis, but it **voids the scoreline**. It means a check
 was graded BEFORE that arm last changed the deliverable, so the verdict describes an artifact that

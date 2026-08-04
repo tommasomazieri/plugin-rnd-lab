@@ -2,7 +2,7 @@
 description: >-
   Plan the next A/B run of an ab-bench experiment: write the task brief (task.md, the
   identical opening assignment both arms receive) and author REAL Definition-of-Done
-  checks BEFORE firing — working script/prompt/human check files (dod-lite's exact
+  checks BEFORE firing — working script/prompt check files (dod-lite's exact
   format), reusing the plugin-under-test's own checker scripts where it ships them.
   Auto-trigger when the user says: "plan the next run", "plan run 2", "define the task for
   the ab test", "write the task brief", "set up the next iteration", "prepare the next
@@ -83,7 +83,8 @@ be able to tell whether it held. Note it in the run folder so `/ab-bench:analyze
 resolve the right one.
 
 **Autonomy is measured, so don't accidentally design it away.** Every `AskUserQuestion` the
-arm makes counts against the autonomy pillar unless it was forced by a human-tier DoD check.
+arm makes counts against the autonomy pillar. Nothing in the harness forces one any more —
+the DoD auditor never speaks to an arm — so every ask is the arm's own choice.
 A task written as "ask the user before each step" pins that pillar to the floor for both
 arms and measures nothing.
 
@@ -174,11 +175,21 @@ running the interview below.
 ### 4a. Interview for criteria
 
 Draft candidate criteria that would actually distinguish "done" from "not done" for THIS task. For
-each, decide the tier:
+each, decide the tier — there are **two**:
 - **script** — mechanically verifiable by exit code (file exists, build passes, output validates).
-  Prefer this whenever possible.
+  Prefer this whenever possible. It is free.
 - **prompt** — needs judgement but a read-only AI grader could resolve it by investigating.
-- **human** — genuinely needs this user's judgement (taste, "does this match the ask"). Use sparingly.
+
+There is no human tier. A criterion that genuinely needs this user's judgement (taste, "does this
+match the ask") is not a check — it is the quality verdict, and it gets given at
+`/ab-bench:analyze` against the rubric. The old human tier blocked the arm with instructions to
+call `AskUserQuestion`, which manufactured the autonomy signal the harness measures.
+
+**Budget the prompt tier deliberately.** Every prompt check spawns a `claude -p` grader
+**once per turn, per arm** — the auditor runs both tiers at every Stop, ungated, so the per-turn
+series has no holes. Four prompt checks over a five-turn run is forty grader subprocesses. Script
+checks cost nothing and can be as many as you like; each prompt check has to earn its place. If a
+criterion can be expressed as an exit code, express it as an exit code.
 
 For each candidate criterion, also state which `mandate.md` section it maps to (capability gap,
 good-outcome definition, or known weak spot) — this is a hard requirement, not a nice-to-have. If
@@ -231,15 +242,15 @@ rejected, not silently resolved.
   ```json
   { "description": "one line", "seed_expectation": "fail" }
   ```
-- **prompt** / **human**: `<id>.md` with frontmatter:
+- **prompt**: `<id>.md` with frontmatter:
   ```yaml
   ---
-  type: prompt        # or: human
+  type: prompt
   description: "one line, shown in status/failure output"
   seed_expectation: fail    # see below — default fail, declare pass only for a regression guard
   model: claude-haiku-4-5-20251001   # prompt only; FULL model id, never a bare alias
   ---
-  <self-contained grading question (prompt) or question-for-user (human)>
+  <self-contained grading question, answerable from files alone>
   ```
   A `prompt` checker runs with only read-only repo access and no conversation context — write the
   question so it states what "done" looks like, not just "did we do the thing." It must return
@@ -266,8 +277,8 @@ check FILES in `.dod/checks/` are the experiment-level shared/reused state.
   "schema": 1,
   "run": "run-NNN",
   "checks": {
-    "control": [ { "id": "...", "tier": "script|prompt|human", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ],
-    "test":    [ { "id": "...", "tier": "script|prompt|human", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ]
+    "control": [ { "id": "...", "tier": "script|prompt", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ],
+    "test":    [ { "id": "...", "tier": "script|prompt", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ]
   }
 }
 ```
@@ -302,7 +313,7 @@ It clones `seed/` into a throwaway workspace and executes every check against it
 | `BROKEN` / `MISSING` | it errored, or the file referenced in `dod-checks.json` isn't there |
 | `UNGROUNDED` | a prompt check passed while citing no evidence — it didn't actually look |
 | `DECLARED A REGRESSION GUARD` | `seed_expectation: pass` but it fails on the seed |
-| `EMPTY` | a human check with no question text; it would block the arm forever |
+| `UNSUPPORTED` | a `type: human` check. The tier is gone; re-author it or judge it at analyze |
 
 **Do not proceed while anything is rejected.** Fix the check and re-run — don't relax
 `seed_expectation` to make the gate quiet, which converts a real signal into a decorative one. If a

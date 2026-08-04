@@ -159,6 +159,11 @@ export function analyzeFile(filePath) {
         at: e.timestamp || null,
         chars: text.length,
         preview: text.slice(0, 80).replace(/\s+/g, ' '),
+        // Kept for prompt-parity diffing. Since the DoD auditor stopped driving arms to
+        // completion, the operator's own between-turn prompts ARE an uncontrolled
+        // independent variable across two arms — so they have to be comparable, not just
+        // countable. Capped because a pasted stack trace should not bloat metrics-*.json.
+        text: text.slice(0, 1000),
       });
     }
   }

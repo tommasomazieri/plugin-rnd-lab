@@ -130,9 +130,11 @@ handful. If `turn_counts.note` says INCOMPLETE, say so and do not compare turn t
 
 - `hitl_total` = `AskUserQuestion` calls plus every real user turn after the opening prompt. A
   user who stepped in unprompted is as much an autonomy failure as one who was asked.
-- `hitl_harness` = human-tier DoD checks the arm answered. Those interruptions were **caused by
-  the harness**, not by the artifact under test, and crediting them against an arm would
-  penalise it for the experiment's own instrumentation.
+- `hitl_harness` = human-tier DoD checks the arm answered. **Legacy — always 0 on runs fired
+  after the DoD engine became observational.** The tier that produced these was deleted
+  precisely because blocking to instruct an arm to call `AskUserQuestion` manufactured the
+  autonomy signal being measured here. On older runs it is still subtracted, because those
+  interruptions really were caused by the harness rather than by the artifact under test.
 
 When attributing an autonomy delta, say *what the arm asked about*, quoting the anchor. "Test
 asked 3 times vs control's 8" is a number you were given; "test asked only about output
@@ -152,20 +154,33 @@ didn't.
    digests. The digest is ordered and anchored, so the cause is usually visible directly: a run
    of failing tool calls, a hook that blocked, an operator rejection, a skill invoked
    repeatedly, a subagent dispatched in a loop. Quote it with its `L<n>` and its file.
-4. Cross-reference the DoD trackers: which checks flipped to pass, in which arm, at which turn.
+4. Cross-reference the DoD trackers. `session.history` is a **per-turn, append-only series** —
+   each entry is a complete record of one turn, and earlier turns are never rewritten. Read it
+   as a trajectory, not a final score: which checks flipped to pass, in which arm, at which
+   turn, and which ones **regressed** after having passed. An arm that reached green at turn 2
+   and an arm that reached the same green at turn 7 are not the same result.
    Two specific things to look for:
    - a prompt-tier verdict recorded `pass` with an **empty `evidence` array** — a grader that
      cited nothing did not look. Report the check as ungrounded, not as passed.
-   - a human-tier verdict whose `.dod-answers/<id>.json` claim disagrees with the recorded
-     `session.state` entry, or an `answer_source: "arm-reported"` result the arm had no
-     evidence for. That is a forged verdict and outranks every other finding in the run.
-5. Weigh bias indicators BEFORE crediting any artifact: asymmetric user turns or user chars,
-   operator tool rejections, one arm compacting and the other not. Say plainly how much of the
-   delta could be user- or harness-driven.
-6. Use `mandate.md` to frame WHY a finding matters — does the delta sit in the capability gap
+   - a check that went `pass` → `fail` between turns. That is a regression the arm introduced
+     while working, and it is invisible in `state`, which only holds the latest value.
+5. Weigh bias indicators BEFORE crediting any artifact: `analysis/prompt-parity.json` first,
+   then asymmetric user chars, operator tool rejections, one arm compacting and the other not.
+   Say plainly how much of the delta could be user- or harness-driven.
+
+   **Prompt parity is now load-bearing.** The DoD auditor no longer drives an arm to
+   completion, so the operator decides when each session ends and what to say in between —
+   across two arms. A `DIVERGENT` verdict means some of the delta is attributable to what was
+   typed rather than to the artifact. Quote the diverging turns and bound your causal claim by
+   them explicitly. Never present an attribution as clean over a divergent run.
+6. Read `analysis/delivery.json` before ranking anything. An arm marked `delivered: false`
+   stopped with the job unfinished, and its cost figures are not a win — an arm that quits
+   early looks cheap and fast on every countable pillar. If either arm did not deliver, the
+   run's hypothesis is `inconclusive` unless the hypothesis was itself about delivery.
+7. Use `mandate.md` to frame WHY a finding matters — does the delta sit in the capability gap
    the plugin exists to close, or is it incidental? It sharpens findings; it is not itself a
    finding and gets no OBJECTIVE/SUBJECTIVE tag.
-7. Incorporate the human verdict as one signal among several — it settles output QUALITY
+8. Incorporate the human verdict as one signal among several — it settles output QUALITY
    (which you often cannot see, e.g. a rendered deck), but it does not override token/turn
    evidence on EFFICIENCY.
 

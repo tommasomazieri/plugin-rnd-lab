@@ -115,14 +115,16 @@ test('REJECTS a regression guard that does NOT pass on the seed', () => {
   assert.match(r.stdout, /DECLARED A REGRESSION GUARD/);
 });
 
-test('REJECTS a human check with no question text', () => {
+test('REJECTS any human check — the tier no longer exists', () => {
+  // Even a well-formed one. At run time it records as an ungraded error every turn, so a
+  // criterion the author believed was being measured silently is not.
   const { testenvRoot, runDir } = setup(
-    { 'empty-ask.md': '---\ntype: human\n---\n' },
-    { control: [{ id: 'empty-ask' }], test: [{ id: 'empty-ask' }] },
+    { 'ask.md': '---\ntype: human\n---\nDoes this look right?' },
+    { control: [{ id: 'ask' }], test: [{ id: 'ask' }] },
   );
   const r = nodeExpectFail(SCRIPTS.probeChecks, [testenvRoot, runDir]);
   assert.notEqual(r.status, 0);
-  assert.match(r.stdout, /EMPTY/);
+  assert.match(r.stdout, /UNSUPPORTED/);
 });
 
 test('probes the union of both arms, and --ids overrides', () => {

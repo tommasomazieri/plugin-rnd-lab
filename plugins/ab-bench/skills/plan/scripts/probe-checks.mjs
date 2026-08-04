@@ -233,16 +233,20 @@ async function main() {
       rows.push({ id, tier: 'prompt', expected, actual: r.result, output: r.output, ...v });
     });
 
-    // A human check has no seed verdict to probe — only its shape can be checked here.
+    // The human tier no longer exists — these checks observe a session, they never ask it for
+    // anything. Rejected outright rather than probed: at run time it would record as an
+    // ungraded error on every single turn, which is a silently missing criterion.
     for (const id of humanIds) {
-      const hasQuestion = Boolean((defs[id].body || '').trim());
       rows.push({
         id,
         tier: 'human',
         expected: 'n/a',
         actual: 'n/a',
-        ok: hasQuestion,
-        why: hasQuestion ? '' : 'EMPTY — a human check with no question text cannot be answered, and will block the arm forever.',
+        ok: false,
+        why:
+          'UNSUPPORTED — the human tier was removed. Blocking an arm to make it ask the user ' +
+          'manufactured the autonomy signal this harness measures. Re-author as a script or ' +
+          'prompt check, or drop it and give that judgement yourself at /ab-bench:analyze.',
       });
     }
   } finally {
