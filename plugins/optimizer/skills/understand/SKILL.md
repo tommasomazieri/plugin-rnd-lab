@@ -28,8 +28,32 @@ signal, too complex = confounds unrelated to the plugin).
   its "new mandate" branch): init already collected the plugin dirs, control compensation,
   and common config this same session, and already ran `ab-bench-scaffold.mjs` to create
   the target `mandate.md` path. Use that context directly — do NOT re-ask "which plugin" or
-  "what does control get." Go straight to the interview in section 2, write to the path
-  init handed you.
+  "what does control get."
+
+  **First, check whether `mandate.md` already exists at that path.** `create-fresh` only
+  mkdirs and writes `state.json`; it never writes a mandate. So a file being there means
+  something else authored it — in practice `/prospector:handoff`, which writes
+  `.ab-bench/<mandate-id>/mandate.md` and `quality-rubric.md` directly from a finished
+  discovery engagement.
+
+  - **It exists → IMPORT MODE. Do not run the interview.** Six of the seven categories below
+    were established over an entire engagement backed by recorded evidence and real MVP use;
+    re-asking them would make the user answer, one at a time, everything they just spent that
+    engagement answering. Instead:
+    1. Show them the mandate as written, section by section.
+    2. Ask ONLY for **§6 Appropriate task complexity**. It is deliberately left as
+       `_NOT ESTABLISHED_` because it is about A/B signal strength, not about the problem —
+       nothing in a discovery engagement answers it, so Prospector does not guess. Interview
+       for it as described in section 2.6 and replace that placeholder.
+    3. Ask whether anything else reads wrong, and correct only what they flag.
+    4. If `quality-rubric.md` is present, show it too and skip section 3b — Prospector derived
+       it from the same ranked outcomes. Only author one if it is missing.
+
+    Do not "improve" imported sections unprompted. They are anchored to cited evidence you
+    cannot see, and rewriting them from a shorter conversation loses that grounding.
+
+  - **It does not exist** → go straight to the interview in section 2 and write to the path
+    init handed you.
 
 - **Invoked standalone**: resolve the repo root and current state by running (reuses
   init's scaffold script — no duplicated resolution logic):

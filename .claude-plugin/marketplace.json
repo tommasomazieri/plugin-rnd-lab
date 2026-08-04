@@ -13,6 +13,11 @@
       "description": "Control-vs-plugin A/B testing harness: creates experiment environments, fires paired sessions with everything-else-equal configs, analyzes both session JSONLs + DoD logs + human verdict into an evidence-backed improvement report."
     },
     {
+      "name": "prospector",
+      "source": "./plugins/prospector",
+      "description": "Discovery-stage counterpart to the Optimizer: starts from ambiguity rather than a spec. Interviews for evidence instead of accepting the stated issue, keeps competing problem framings alive, tracks hypotheses with explicit confidence, and builds deliberately narrow MVP plugins whose real use is the primary evidence. Hands a validated direction to the Optimizer as a pre-written mandate."
+    },
+    {
       "name": "dod-lite",
       "source": "./plugins/dod-lite",
       "description": "Internal audit instrument for optimizer arm sessions: runs Definition-of-Done checks silently at Stop and records a per-turn report. Observational only — it never speaks to the session it observes. Registered so it installs alongside optimizer; not intended for standalone use."

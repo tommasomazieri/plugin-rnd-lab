@@ -1,16 +1,42 @@
 # plugin-rnd-lab
 
 A Claude Code **marketplace** for plugin R&D tooling — instruments for testing, measuring, and
-iterating on other Claude Code plugins. Ships one plugin: **optimizer** (the A/B harness). A
-trimmed, hooks-only Definition-of-Done engine (`plugins/dod-lite/`) ships alongside it in this
-repo but is not separately installed — optimizer loads it directly into every arm session it fires.
-See "DoD tracking" below.
+iterating on other Claude Code plugins.
+
+Two plugins, operating at different stages:
+
+| | **Prospector** | **Optimizer** |
+|---|---|---|
+| starts from | a situation, frustration, or hunch | an already-defined artifact |
+| answers | *is this worth building at all?* | *does it actually help?* |
+| optimises for | **effectiveness** | **efficiency** |
+| evidence | your real use of narrow MVPs | paired A/B runs across five pillars |
+| output | a validated direction + a written `mandate.md` | an evidence-backed improvement report |
+
+> Prospect first. Then refine.
+
+They chain: Prospector hands the Optimizer a pre-written mandate, so `/optimizer:understand`
+confirms rather than re-interviewing you on everything you just established. Either works alone.
+
+A third plugin, `dod-lite`, is the Optimizer's arm-side **audit instrument**. It is registered so
+it installs alongside, but it is internal — you never invoke it. See "DoD tracking" below.
 
 **Who this is for:** you're building (or evaluating) a Claude Code plugin and want proof it
 actually helps — not just a feeling. Not a general-purpose plugin, not a 2-minute install: it's a
 real testing harness with a learning curve. Windows only for now (see Prerequisites for why).
 
-## What's optimizer, in one paragraph
+## What's Prospector, in one paragraph
+
+You have a problem, not a spec. Prospector refuses to take your first framing at face value —
+"I need a tool that manages my tasks" is a *solution*, and the problem behind it is still unknown.
+It interviews you for concrete past behaviour rather than opinions, keeps competing problem
+framings alive instead of collapsing to the first one, labels every claim with its actual
+confidence (`confirmed` … `assumption`), and builds deliberately narrow MVP plugins that you
+install and use in your own real projects. Your use of those MVPs — especially the parts you
+quietly abandoned — is the evidence. Runs in place, in the directory the future plugin will live
+in. See `plugins/prospector/README.md`.
+
+## What's Optimizer, in one paragraph
 
 You built a Claude Code plugin. Does it actually make sessions better, or does it just feel that
 way? optimizer answers that with an A/B test: it fires two paired Claude Code sessions — a
@@ -37,7 +63,14 @@ earned its keep, and what to fix before the next iteration.
 ```
 claude plugin marketplace add <path-to-this-repo>
 claude plugin install optimizer@plugin-rnd-lab
+claude plugin install prospector@plugin-rnd-lab     # optional — the discovery stage
+claude plugin install dod-lite@plugin-rnd-lab       # required by optimizer: its arm instrument
 ```
+
+`dod-lite` must be installed for `/optimizer:fire` to work. An installed plugin cannot reach
+files outside its own directory, so the Optimizer resolves the audit instrument as a cached
+sibling — and refuses to launch a run at all if it is missing, rather than producing an
+uninstrumented run that looks identical to one where every check passed.
 
 This repo is typically used as a **local** marketplace source (clone it, point `marketplace add`
 at the local path). Whenever you pull changes to this repo, refresh optimizer's cached copy:
