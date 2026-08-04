@@ -1,5 +1,5 @@
 // Shared helpers for dod-lite's Stop hook (dod-check.mjs — the only hook this
-// trimmed, ab-bench-owned copy ships). Fail-open contract: internal errors are
+// trimmed, optimizer-owned copy ships). Fail-open contract: internal errors are
 // logged to stderr and the hook exits 0, never blocking an unrelated session.
 
 import { promises as fs } from 'node:fs';
@@ -13,7 +13,7 @@ export const CONFIG_FILE = 'config.json';
 // There was an ANSWERS_DIR ('.dod-answers') here, the write channel for the human tier.
 // Both are gone: these checks observe a session, they never ask it for anything. The
 // human is the gate now — they end a session when they choose and report the outcome at
-// /ab-bench:analyze. See dod-check.mjs's header for why asking cost more than it bought.
+// /optimizer:analyze. See dod-check.mjs's header for why asking cost more than it bought.
 
 export const DEFAULT_RUNNERS = {
   '.mjs': 'node',
@@ -58,7 +58,7 @@ export async function pathExists(p) {
   }
 }
 
-// Session files are created/seeded entirely by ab-bench's arm-session-start.mjs
+// Session files are created/seeded entirely by optimizer's arm-session-start.mjs
 // (a separate plugin, no import dependency on this file) — this hook only ever
 // reads an already-seeded file and writes updated state/history back onto it.
 export async function readSession(cwd, sessionId) {

@@ -8,14 +8,14 @@
   },
   "plugins": [
     {
-      "name": "ab-bench",
-      "source": "./plugins/ab-bench",
+      "name": "optimizer",
+      "source": "./plugins/optimizer",
       "description": "Control-vs-plugin A/B testing harness: creates experiment environments, fires paired sessions with everything-else-equal configs, analyzes both session JSONLs + DoD logs + human verdict into an evidence-backed improvement report."
     },
     {
       "name": "dod-lite",
       "source": "./plugins/dod-lite",
-      "description": "Internal audit instrument for ab-bench arm sessions: runs Definition-of-Done checks silently at Stop and records a per-turn report. Observational only — it never speaks to the session it observes. Registered so it installs alongside ab-bench; not intended for standalone use."
+      "description": "Internal audit instrument for optimizer arm sessions: runs Definition-of-Done checks silently at Stop and records a per-turn report. Observational only — it never speaks to the session it observes. Registered so it installs alongside optimizer; not intended for standalone use."
     }
   ]
 }

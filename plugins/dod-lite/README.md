@@ -1,13 +1,13 @@
-# dod-lite (ab-bench arm instrument)
+# dod-lite (optimizer arm instrument)
 
 **Not a standalone plugin.** This is a trimmed, hooks-only fork of dod-lite, purpose-built as the
-Definition-of-Done **auditor** ab-bench auto-injects into every control/test arm session it fires.
-It is registered in `marketplace.json` only so that it is cached alongside ab-bench — an installed
+Definition-of-Done **auditor** optimizer auto-injects into every control/test arm session it fires.
+It is registered in `marketplace.json` only so that it is cached alongside optimizer — an installed
 plugin cannot reach files outside its own directory, so an unregistered sibling resolved to a dead
 path on every marketplace install. It is not meant to be installed or used on its own.
 
 It stays a separate plugin on purpose: an arm has to load the auditor and **nothing else**. Folding
-it into ab-bench would mean enabling ab-bench's own skills inside the very sessions being measured.
+it into optimizer would mean enabling optimizer's own skills inside the very sessions being measured.
 
 If you want full-featured, standalone, per-session DoD tracking for your own projects (in-session
 planning interview, `/dod-lite:status`, etc.), use the free-standing DoD-lightweight install this
@@ -16,7 +16,7 @@ session, they share a hook name and would double-fire.
 
 ## What it does here
 
-ab-bench's `/ab-bench:plan` authors real check files (`.dod/checks/`) and pre-seeds each arm's
+optimizer's `/optimizer:plan` authors real check files (`.dod/checks/`) and pre-seeds each arm's
 session state (`.dod/sessions/<session_id>.json`) *before* either arm session ever starts —
 checks are never designed live, in-session, by either arm. This plugin's only job is to **observe**
 that pre-authored set: at every `Stop` it runs the session's checks in two tiers — script and
@@ -28,7 +28,7 @@ session it just measured.
 The hook writes **nothing to stdout**: no `decision`, no `reason`, no `systemMessage`. That is the
 invariant this plugin exists to uphold, and it is load-bearing for the experiment:
 
-- ab-bench injects it into **both** arms identically. Feedback would pull control and test toward
+- optimizer injects it into **both** arms identically. Feedback would pull control and test toward
   the same output and mask the very difference being measured.
 - Real vanilla Claude Code has no such feedback loop, so control-with-nudges is not control and
   nothing measured that way generalises.
@@ -40,26 +40,26 @@ correct for a DoD engine driving a job to completion, and wrong for one measurin
 got there unaided. Two regression tests assert the silence directly.
 
 There is no human tier. The human is the gate: a session ends when it ends, and the operator either
-reports the job undone at `/ab-bench:analyze` or feeds back and grants another turn. The old tier
+reports the job undone at `/optimizer:analyze` or feeds back and grants another turn. The old tier
 blocked with instructions telling the arm to call `AskUserQuestion`, manufacturing the very autonomy
 signal the harness measures.
 
 There is deliberately no `SessionStart`, `UserPromptSubmit`, `PreToolUse`, or `PostToolUse` hook,
-no planning skill, and no status command — an ab-bench arm must never be nudged toward, or even
-able to discover, any DoD-*design* capability. All of that lives in ab-bench's own
-`/ab-bench:plan` skill instead. See `plugins/ab-bench/docs/dod-contract.md` for the full contract
+no planning skill, and no status command — an optimizer arm must never be nudged toward, or even
+able to discover, any DoD-*design* capability. All of that lives in optimizer's own
+`/optimizer:plan` skill instead. See `plugins/optimizer/docs/dod-contract.md` for the full contract
 (schema, file layout, injection mechanics).
 
 ## `.dod/` layout (in the shared experiment root, not the plugin)
 
 ```
 .dod/                      ← READ-ONLY to a graded session; never write here from an arm
-  checks/                  ← authored by /ab-bench:plan, reusable across runs of the same experiment
+  checks/                  ← authored by /optimizer:plan, reusable across runs of the same experiment
     <id>.py|.mjs|.sh|.ps1|.rb|...   type: script — exit code is the verdict
     <id>.meta.json                   optional sidecar: declared metadata for a script check
     <id>.md                          type: prompt, via frontmatter
   sessions/
-    <session_id>.json      ← seeded by ab-bench's arm-session-start.mjs, updated by this plugin's Stop hook
+    <session_id>.json      ← seeded by optimizer's arm-session-start.mjs, updated by this plugin's Stop hook
   config.json               ← optional, see below
 ```
 
@@ -109,7 +109,7 @@ is the normal state — so the AI-graded tier silently never ran. That was the e
 don't work" symptom.
 
 Prompt-tier cost is therefore a **planning** concern, not a runtime one: a prompt check bills one
-grader subprocess per turn per arm, so four of them over a five-turn run is forty. `/ab-bench:plan`
+grader subprocess per turn per arm, so four of them over a five-turn run is forty. `/optimizer:plan`
 is instructed to be sparing and to prefer exit codes wherever a criterion can be expressed as one.
 
 A prompt verdict carries `pass`, `reason`, `evidence` (cited `{path, line?, quote}` entries) and
@@ -136,7 +136,7 @@ latest value per check and is a convenience; the history array is the record.
 
 That series is what makes improvement versus regression readable across turns, including a check
 that went `pass` → `fail` while the arm kept working, which `state` alone cannot show. It is also
-what lets `/ab-bench:analyze` separate a plugin problem from bad operator prompts in between turns.
+what lets `/optimizer:analyze` separate a plugin problem from bad operator prompts in between turns.
 
 ## Design notes
 

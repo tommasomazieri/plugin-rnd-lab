@@ -1,0 +1,480 @@
+# AB-Bench: Split the Marketplace Into Two Plugins
+
+We need to evolve AB-Bench from a single optimization-oriented product into a two-plugin marketplace.
+
+The two plugins solve different problems, operate at different stages, and must not be conflated.
+
+## Core distinction
+
+### Optimizer — existing product
+
+The existing AB-Bench product is the **Optimizer**.
+
+It starts from an already-defined plugin. The user already knows:
+
+- what must be built or improved;
+- the required quality level;
+- the relevant scope and constraints;
+- the outcome the system must achieve.
+
+The Optimizer's role is to make that known solution as efficient as possible.
+
+Its primary objective is to optimize performance along the 4 axes we know already:
+
+- Token consumption
+- Output token in the mix
+- Turns to completion
+- agent autonomy
+
+The Optimizer does **not** decide whether the user is solving the right problem. It assumes the problem and desired outcome have already been properly defined.
+
+In short:
+
+> The Optimizer improves the execution of a defined solution.
+
+---
+
+### "Definer" — new product
+
+We need a new plugin, codename **Definer** - this name is not brandable, optimiziere is clear, definer is not, let's first find an appropriate name.
+
+The Definer starts earlier than the Optimizer. It starts with ambiguity.
+
+Its input is not a specification or a solution. Its input is a user who reports a situation, frustration, opportunity, uncertainty, or recurring problem, but may not understand:
+
+- what the real underlying problem is;
+- whose problem it is;
+- what outcome they actually want;
+- which constraints matter;
+- whether their assumed solution is correct;
+- what should be designed, changed, or tested.
+
+The Definer must help the user discover and define what is genuinely desirable, useful, and worth solving.
+
+Its goal is **effectiveness**, not efficiency.
+
+In short:
+
+> The Definer determines what should be solved and what a successful solution would mean.
+
+Only after the Definer has produced a sufficiently validated direction should the Optimizer be invoked to make the resulting solution efficient.
+
+---
+
+## Definer conceptual model
+
+The Definer is a compact, iterative Design Thinking plugin.
+
+It does not stop at defining a problem or producing a design brief: throughout the workflow, it designs, builds, and iterates a usable MVP plugin for the problem it is defining. The user’s real use of that MVP is the primary source of review and validation.
+
+It must combine:
+
+1. Deep user interviewing;
+2. Continuous tracking of needs, desires, constraints, assumptions, and evidence;
+3. Problem framing and reframing;
+4. Hypothesis generation;
+5. Lightweight validation;
+6. Iteration based on user feedback;
+7. Convergence toward an actionable design brief.
+
+The Definer should be inspired by the `grill-me` skill, in the sense that it first and foremost adopts a "survey" attitude towards the user, but it is not merely a question-asking skill.
+
+`grill-me` asks users for answers rather than jumping to solutions.
+
+The Definer must apply the same discipline at a higher level:
+
+> Ask the user for answers and evidence rather than accepting their initial issue framing as fact.
+
+For example, if a user says:
+
+> “I need a tool that automatically manages my tasks.”
+
+The Definer must not begin designing a task manager.
+
+Instead, it should investigate questions such as:
+
+- What repeatedly fails in the user's current workflow?
+- When does the failure happen?
+- What have they already tried?
+- What does “manage tasks” mean in practical terms?
+- What result would make the user say the problem is solved?
+- What trade-offs are unacceptable?
+- Is the issue task tracking, prioritization, motivation, coordination, memory, planning, or something else?
+- Who experiences the problem and who is affected by it?
+- What evidence supports the user's interpretation?
+
+The stated issue is an entry point, not the final problem definition.
+
+---
+
+## Definer operating principles
+
+The Definer must follow these principles.
+
+### Do not prematurely solve
+
+Do not propose a solution simply because the user expresses an initial idea.
+
+Treat proposed solutions as hypotheses about the desired outcome, not as requirements.
+
+Separate:
+
+- stated solution;
+- stated issue;
+- observed symptoms;
+- underlying needs;
+- desired outcomes;
+- constraints;
+- assumptions;
+- evidence;
+- unresolved questions.
+
+### Maintain a living problem model
+
+The Definer must continuously maintain a structured internal and user-visible record of the discovery process.
+
+At minimum, track:
+
+- `User context`
+- `Stakeholders`
+- `Stated issue`
+- `Observed symptoms`
+- `Current workarounds and alternatives`
+- `Pain points`
+- `Needs`
+- `Desired outcomes`
+- `Functional requirements`
+- `Emotional and social requirements`
+- `Constraints`
+- `Assumptions`
+- `Evidence`
+- `Open questions`
+- `Candidate opportunity areas`
+- `Hypotheses`
+- `Validation status`
+- `Confidence level`
+- `Decision log`
+
+This record is the single source of truth for the Definer process.
+
+The Definer must update it whenever new user information materially changes the understanding of the situation.
+
+### Ask high-information questions
+
+The Definer must not run generic interviews or dump long questionnaires.
+
+It should select the next question based on expected learning value.
+
+Prioritize questions that can:
+
+- challenge a major assumption;
+- distinguish between competing interpretations;
+- reveal the user's actual desired outcome;
+- expose important constraints;
+- identify a stakeholder or context previously missed;
+- uncover existing behavior and workarounds;
+- reveal whether the problem is frequent, severe, or consequential.
+
+Ask one focused question at a time unless a short grouped follow-up is clearly more efficient.
+
+Explain briefly why a question matters when doing so would help the user answer accurately.
+
+### Prefer behavior over opinion
+
+Prioritize concrete past behavior over abstract preferences.
+
+Prefer:
+
+- “Tell me about the last time this happened.”
+- “What did you do instead?”
+- “What did that cost you?”
+- “What did you try before?”
+- “What made that workaround insufficient?”
+
+Avoid relying only on:
+
+- “Would you use X?”
+- “Do you like Y?”
+- “Would a feature that does Z be useful?”
+
+Users are often better at reporting their context, behavior, and constraints than predicting whether they would adopt an imagined solution.
+
+### Explicitly manage uncertainty
+
+The Definer must distinguish validated information from assumptions.
+
+Do not present an inference as a user-confirmed fact.
+
+Use explicit status labels, such as:
+
+- `Confirmed`
+- `Strongly supported`
+- `Tentative`
+- `Assumption`
+- `Unknown`
+- `Contradicted`
+
+When evidence is weak, state what would be required to validate or invalidate the relevant hypothesis.
+
+---
+
+## Autonomous-but-user-grounded process
+
+The Definer must be as autonomous as possible because a single user may be the only available source of feedback, and their time is limited.
+
+Autonomy must reduce unnecessary interaction, not replace real user understanding with invented certainty.
+
+Use the following interaction strategy:
+
+1. Ask only the most decision-relevant question available.
+2. Consolidate answers into the living problem model.
+3. Infer candidate interpretations, clearly marking them as hypotheses.
+4. Present concise synthesis checkpoints rather than asking the user to review raw notes.
+5. Ask the user to correct, rank, confirm, or reject the highest-impact interpretations.
+6. When enough information exists, design and build the smallest usable MVP plugin.
+7. Have the user use that plugin in their real workflow; treat their usage, review, failures, and workarounds as new evidence.
+8. Iterate on both the MVP and the underlying problem framing only where the new evidence materially affects the recommended direction.
+
+The Definer should avoid endless discovery.
+
+It must explicitly decide whether the current evidence is sufficient to:
+
+- continue interviewing;
+- conduct a lightweight validation step;
+- produce an initial design package;
+- request external evidence or stakeholder input;
+- hand the result to the Optimizer.
+
+---
+
+## Definer workflow
+
+Implement the Definer as a staged but non-linear workflow. It must be able to return to earlier stages whenever new evidence invalidates the current framing.
+
+### Stage 1: Intake and initial framing
+
+Accept the user's stated issue.
+
+Extract and record:
+
+- the user's initial framing;
+- any requested solution;
+- known actors and stakeholders;
+- apparent context;
+- visible constraints;
+- immediate ambiguities;
+- assumptions embedded in the user's language.
+
+Do not accept the framing as final.
+
+Produce a short initial interpretation and ask the single most useful next question.
+
+### Stage 2: Contextual inquiry
+
+Investigate the user's real situation through concrete examples and past behavior.
+
+Understand:
+
+- when the issue occurs;
+- who experiences it;
+- what triggers it;
+- what the user does now;
+- what alternatives already exist;
+- why current alternatives fail;
+- what the consequences are;
+- what success would look like.
+
+### Stage 3: Need and outcome extraction
+
+Translate raw user statements into structured needs and desired outcomes.
+
+Distinguish between:
+
+- functional needs;
+- emotional needs;
+- social needs;
+- operational constraints;
+- business constraints;
+- technical constraints;
+- adoption barriers;
+- risks and trade-offs.
+
+Where useful, formulate outcome statements in a JTBD/ODI-compatible form, but do not force jargon onto the user.
+
+### Stage 4: Problem reframing
+
+Generate a small number of competing problem framings.
+
+For each framing, specify:
+
+- target user or stakeholder;
+- context;
+- unmet need;
+- desired outcome;
+- supporting evidence;
+- unresolved assumptions;
+- strategic implications.
+
+Present the framings clearly and ask the user to react to them.
+
+The user should be able to say:
+
+- “Yes, that is the real issue.”
+- “Partly, but this is missing.”
+- “No, that is not what I mean.”
+- “This is more important than the others.”
+
+### Stage 5: Opportunity and hypothesis design
+
+Convert the strongest problem framing into testable opportunities and hypotheses.
+
+Keep many hypotheses early.
+
+Each hypothesis should include:
+
+- the assumption being tested;
+- why it matters;
+- the expected user or stakeholder outcome;
+- the lowest-cost validation method;
+- success and failure signals;
+- current confidence.
+
+Do not converge on a single solution prematurely.
+
+### Stage 6: Small design package and MVP plugin
+
+When the Definer has enough evidence, produce a compact package for the user.
+
+The package must include a small, usable MVP plugin that embodies the strongest current solution direction. The user must use this MVP in a real or representative workflow; that use is the main review and validation mechanism for the next iteration.
+
+The package must contain:
+
+1. **Defined problem statement**  
+   A concise, evidence-based explanation of the problem worth solving.
+
+2. **User and stakeholder model**  
+   Who is affected, in which context, and why.
+
+3. **Needs and desired outcomes**  
+   Ordered by importance and confidence.
+
+4. **Constraints and non-goals**  
+   What the eventual solution must respect and what it should not attempt to solve.
+
+5. **Current alternatives and failure modes**  
+   What users do today and why that is insufficient.
+
+6. **Opportunity areas**  
+   The most promising directions, without prematurely treating one as the final solution.
+
+7. **Ranked hypotheses**  
+   Including evidence, uncertainty, and recommended validation.
+
+8. **Recommended next experiment**  
+   The smallest meaningful step that reduces the most important uncertainty.
+
+9. **Handoff readiness**  
+   State whether the work is ready for:
+   - more discovery;
+   - validation;
+   - concept design;
+   - implementation;
+   - transfer to the Optimizer.
+
+10. **MVP plugin**  
+    A versioned, installable, deliberately narrow plugin that tests the highest-value or highest-risk solution hypothesis in actual user use.
+
+This package is intentionally small, clear, versioned, and revisable.
+
+---
+
+## Iteration model
+
+The Definer must treat the user’s actual use of each MVP plugin, together with their explicit review, as evidence.
+
+When the user uses or reacts to an MVP plugin and its associated package, the Definer must:
+
+1. Identify what the feedback confirms, contradicts, or leaves unresolved.
+2. Update the living problem model.
+3. Explain what changed and why.
+4. Revise the problem framing, needs, hypotheses, or next experiment as needed.
+5. Avoid restarting the entire process unless the new evidence invalidates the core framing.
+
+Maintain a version history for each design package.
+
+Each version should record:
+
+- what changed;
+- why it changed;
+- which evidence triggered the change;
+- which assumptions remain unresolved;
+- whether confidence increased or decreased.
+
+---
+
+## Relationship with the Optimizer
+
+The Definer and Optimizer must have a clean handoff contract.
+
+The Definer hands work to the Optimizer only when it can provide:
+
+- a validated or sufficiently supported problem statement;
+- prioritized desired outcomes;
+- measurable success criteria;
+- known constraints;
+- clear scope;
+- explicit non-goals;
+- a chosen solution direction or implementation target;
+- known unresolved risks.
+
+The Optimizer then takes this defined target and optimizes its delivery.
+
+The Definer must never claim that an optimized solution is desirable merely because it is efficient.
+
+The Optimizer must never redefine the user problem unless it detects a contradiction or missing requirement and explicitly sends the work back to the Definer.
+
+---
+
+## Required deliverable for this task
+
+Implement the full new AB-Bench marketplace in this repository.
+
+Do not stop at a proposal, architecture document, sample interaction, scaffold, or partial implementation. You are Claude Code: inspect the existing repository, preserve and migrate the current product into the Optimizer where appropriate, then build the complete working marketplace.
+
+The deliverable must include:
+
+1. A working marketplace containing:
+   - `ab-bench-optimizer`, representing the existing optimization product;
+   - the new Definer plugin, under a temporary codename until an appropriate brandable name has been selected;
+   - any shared core or utility plugin that is genuinely justified;
+
+2. A complete Definer implementation, including:
+   - skills;
+   - agents or subagents;
+   - persistent state and artifact model;
+   - user interaction model;
+   - package/versioning model;
+   - MVP-plugin generation and iteration workflow;
+   - Definer-to-Optimizer handoff format;
+
+3. A complete filesystem structure and all required implementation files;
+
+4. The Definer workflow, implemented so that it can:
+   - investigate an ambiguous stated issue;
+   - maintain the living problem model;
+   - generate and track hypotheses;
+   - build a deliberately narrow MVP plugin;
+   - collect evidence from the user’s actual use of that MVP;
+   - revise the MVP and problem framing across iterations;
+   - hand a sufficiently validated plugin to the Optimizer;
+
+5. Documentation and at least one working end-to-end example showing:
+   - an ambiguous user issue;
+   - progressive questioning;
+   - a reframed problem;
+   - tracked assumptions;
+   - an MVP plugin produced by the Definer;
+   - user-use review evidence;
+   - a resulting iteration or Optimizer handoff.
+
+Before making irreversible architectural choices, inspect the existing repository and use its current conventions where they are sound. Do not wait for approval after producing a proposal: implement the marketplace end to end.

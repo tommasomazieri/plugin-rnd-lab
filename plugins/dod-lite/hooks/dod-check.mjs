@@ -6,7 +6,7 @@
 // `reason`, no `systemMessage`, nothing on stdout at all. That is the single
 // invariant this file exists to uphold, and it is load-bearing for the experiment:
 //
-//   - ab-bench injects this into BOTH arms identically. Feedback would pull both
+//   - optimizer injects this into BOTH arms identically. Feedback would pull both
 //     arms toward the same output and mask the very difference being measured.
 //   - Real vanilla Claude Code has no such feedback. Control-with-nudges is not
 //     control, so any result obtained that way does not generalise.
@@ -28,11 +28,11 @@
 // skipped the prompt tier whenever a script check was red — which mid-run is the
 // normal state — so the graded tier silently never ran. Both tiers now run every
 // turn unconditionally; prompt-tier COST is a planning concern, handled by
-// /ab-bench:plan being sparing about how many prompt checks a run declares, since
+// /optimizer:plan being sparing about how many prompt checks a run declares, since
 // each one now bills once per turn per arm.
 //
 // The human tier is gone entirely. The human is the gate: a session ends when it
-// ends, and the user either reports the job undone at /ab-bench:analyze or feeds
+// ends, and the user either reports the job undone at /optimizer:analyze or feeds
 // back and grants another turn. The old tier blocked with instructions telling the
 // arm to call AskUserQuestion — which manufactured the very autonomy signal the
 // harness measures.
@@ -40,7 +40,7 @@
 // PER-TURN AUDIT, APPEND-NEVER-OVERWRITE. Every stop appends a complete record of
 // that turn to `history`, with full output and evidence, not just a verdict. Earlier
 // turns are never rewritten. That series is what makes improvement vs regression
-// across turns visible, and what lets /ab-bench:analyze separate a plugin problem
+// across turns visible, and what lets /optimizer:analyze separate a plugin problem
 // from bad user prompts in between turns.
 //
 // Two invariants exist because run-002 lost an entire prompt tier to a hook kill:
@@ -51,7 +51,7 @@
 //
 // Infrastructure failures (spawn error, subprocess timeout, unparseable verdict,
 // exhausted budget) record `error`, NOT `fail`. A checker bug must stay
-// distinguishable from a genuine failure when /ab-bench:analyze reads the series.
+// distinguishable from a genuine failure when /optimizer:analyze reads the series.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -263,7 +263,7 @@ export async function loadCheckDefs(cwd, ids) {
 // What this check is declared to report against a PRISTINE seed workspace. Default
 // `fail`: a check normally asserts work that has not happened yet. `pass` means it is a
 // regression guard — legitimate, but it can only contribute to an A/B by flipping, so
-// /ab-bench:plan makes the author justify it. The gate compares this against reality.
+// /optimizer:plan makes the author justify it. The gate compares this against reality.
 export function seedExpectation(def) {
   const raw = String(def?.meta?.seed_expectation ?? 'fail').trim().toLowerCase();
   return raw === 'pass' ? 'pass' : 'fail';
@@ -408,7 +408,7 @@ async function attemptPromptCheck(cwd, id, def, systemPrompt, timeoutMs) {
     evidence,
     confidence: verdict.confidence === 'low' ? 'low' : 'high',
     // A pass citing nothing is not a pass anyone can check. Recorded here rather than
-    // downgraded, so /ab-bench:analyze decides what an ungrounded verdict is worth.
+    // downgraded, so /optimizer:analyze decides what an ungrounded verdict is worth.
     grounded: evidence.length > 0,
     model: def.meta.model || CHECKER_MODEL,
   };
@@ -537,7 +537,7 @@ async function main() {
       output:
         'human-tier checks are no longer supported: these checks observe, they never ask the ' +
         'session for anything. Re-author as a script or prompt check, or drop it and judge it ' +
-        'yourself at /ab-bench:analyze.',
+        'yourself at /optimizer:analyze.',
     };
     results.push(r);
     await persister.record(r);
@@ -567,7 +567,7 @@ async function main() {
 
   // Diagnostics go to stderr, never stdout. A Stop hook's stdout IS the control
   // channel, so the only safe amount to write there is none — see this file's header.
-  // Anything the run needs to know is in the session file for /ab-bench:analyze.
+  // Anything the run needs to know is in the session file for /optimizer:analyze.
   const errors = results.filter((r) => r.result === 'error');
   if (errors.length > 0) {
     console.error(
