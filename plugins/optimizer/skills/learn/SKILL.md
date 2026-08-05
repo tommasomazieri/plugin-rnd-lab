@@ -173,10 +173,10 @@ written into `env.json`.
 This is the only skill that spawns anything. Two steps:
 
 1. **Dry run first** — shows a parity report: what both arms share, what
-   only control gets, what only test gets, and whether DoD checks apply
-   symmetrically (or asymmetrically for a documented plugin-native-checker
-   reason). Anything asymmetric that ISN'T explained stops you here to fix
-   `env.json` or the check list before anything launches.
+   only control gets, what only test gets, and whether the DoD checks are
+   identical across arms and all generic. Any asymmetry, or any check that
+   runs the artifact's own tooling, stops you here to fix `env.json` or the
+   check list before anything launches.
 2. **Real fire, on your confirmation** — opens **two separate, titled,
    detached terminal windows** at the same time: `"AB <experiment> control
    run-NNN"` and `"AB <experiment> test run-NNN"`. Each is its own

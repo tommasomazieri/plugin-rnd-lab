@@ -458,9 +458,17 @@ export function compareRun(runDir) {
   if (dodChecksDef) {
     const cIds = (dodChecksDef.checks?.control || []).map((x) => x.id).sort().join(',');
     const tIds = (dodChecksDef.checks?.test || []).map((x) => x.id).sort().join(',');
-    dodNote = cIds === tIds
-      ? 'control/test check lists identical'
-      : 'control/test check lists differ BY DESIGN (see dod-checks.json "source" per check) — not a parity violation by itself, session-comparator must explain it';
+    // An asymmetric list used to be excused when a check came from the artifact's own tooling.
+    // That exemption is retired (/optimizer:plan 4b): a check only one arm can run grades only
+    // one arm, so the pass counts either side of it are not like-for-like.
+    const nonGeneric = ['control', 'test']
+      .flatMap((a) => (dodChecksDef.checks?.[a] || []).map((x) => ({ arm: a, ...x })))
+      .filter((x) => x.source && x.source !== 'generic');
+    dodNote = cIds !== tIds
+      ? 'DEFECT: control/test check lists differ — a check only one arm can run grades only one arm, so any pass-count spanning it is NOT like-for-like. Report as a harness defect, do not quote the raw scoreline as a quality comparison.'
+      : nonGeneric.length > 0
+        ? `DEFECT: ${nonGeneric.length} non-generic check(s) [${nonGeneric.map((x) => `${x.arm}:${x.id}`).join(', ')}] — a check that runs the artifact's own tooling measures whether the artifact satisfies itself. Report as a harness defect.`
+        : 'control/test check lists identical, all checks generic';
   }
 
   const comparison = {

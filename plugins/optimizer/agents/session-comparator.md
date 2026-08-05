@@ -90,10 +90,12 @@ you can produce.
   attribution in the transcript by design, and their effect must be read from what the arm
   did with the delivered files instead.
 
-A control/test DoD check-list mismatch is NOT one of these: if `dod-checks.json` tags a check
-`source: "plugin-native"` it only applies to the arm that had the plugin. Explain it, don't
-flag it. An *unexplained* mismatch (no dod-checks.json, or lists differ with no native-source
-justification) is worth flagging but does not by itself stop the analysis.
+A control/test DoD check-list mismatch is NOT one of these, but it IS always a defect to report:
+the lists must be identical and every check must be `source: "generic"`. A check only one arm can
+run grades only one arm, so that column holds no comparison — say so, and treat any pass-count
+built on it as not like-for-like. (The old `source: "plugin-native"` exemption is retired; if you
+see one in an older run's `dod-checks.json`, that run's check lists were asymmetric by design and
+its DoD scoreline should be read accordingly.) This does not by itself stop the analysis.
 
 Checks recorded `pending` or `error` were **never graded**. They are not quality signals and
 must never be read as failures — say the dimension produced no data and name it a harness

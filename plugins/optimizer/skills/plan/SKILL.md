@@ -201,33 +201,43 @@ Present the list (what + tier + mandate.md mapping, not draft file contents yet)
 iterate until agreed — propose before authoring, never the reverse. Zero checks can be a
 legitimate outcome for a trivial task.
 
-### 4b. Check whether the plugin-under-test ships its own checkers — BEFORE writing generic ones
+### 4b. NEVER use the artifact's own checkers as DoD checks
 
-For each agreed criterion, look at the plugin-under-test's repo (`repoRoot` — same as
-`pluginUnderTestRepo` in env.json, and where this whole session is CD'd into) for checker-like
-tooling it already ships: a
-`checks/`, `qa/`, `validators/`, or similarly-named folder, or anything its README/SKILL.md
-documents as QA/validation scripts meant to grade its own output (e.g. a Blender plugin shipping
-mesh-validation scripts). If a plugin-native script already covers a criterion:
-- use it INSTEAD of writing a generic one for that criterion.
-- if control this run is **vanilla**: it goes to the **test arm only** (control has no plugin at all,
-  so it can't run a checker that depends on the plugin's own tooling) — unless a generic equivalent
-  can meaningfully assess the same criterion without the plugin, in which case give control that
-  generic version instead.
-- if control this run is pinned to an older ref (`runs/run-NNN/baseline.json` has a
-  `arms.control.pins.<id>` whose `requested_ref` is set): ALSO look inside that pin's
-  `resolved.path` for the SAME kind of shipped checker (the old ref may or may not
-  still ship it, or may ship an older/different version of it). If found, control gets its own entry
-  for the SAME check `id`, `source: "plugin-native"`, `origin` pointing INTO the worktree — this is the
-  OLD checker judging the OLD code, compared against test's CURRENT checker judging CURRENT code, which
-  is the accurate apples-to-apples comparison (not today's checker run against yesterday's code). If
-  the old tag doesn't ship an equivalent checker at all, fall back to the vanilla-case rule above.
-- this means control and test CAN legitimately end up with different check-id lists, or the same id
-  with different `origin`. That's expected when driven by a plugin-native checker, not a parity
-  violation — record `source`/`origin` (see 4d) so `/optimizer:analyze` explains it instead of flagging it.
+**Every DoD check is generic. It grades the OUTPUT using tooling that exists independently of
+the artifact under test, and it runs identically in both arms.**
+
+Do not import, copy, shell out to, or reference any script the plugin-under-test ships to grade
+its own work — its `checks/`, `qa/`, `validators/` folder, its Stop-hook gate, its lint, its
+self-scoring rubric. Not for one arm, not for both, not with an `origin` note explaining it. If
+a criterion can only be expressed by running the artifact's own tooling, it is not a DoD
+criterion. Drop it and say so.
+
+**Three independent reasons, any one sufficient:**
+
+1. **The artifact must function autonomously, as if no DoDs existed.** DoD checks are the
+   operator's acceptance criteria, fixed before the run, from outside. The moment a check *is*
+   the plugin's own gate, the experiment stops asking "did this produce good work" and starts
+   asking "did this satisfy itself."
+
+2. **A criterion the artifact already enforces internally cannot fail, so it measures nothing.**
+   run-007 shipped `qa-gate-clean`, which shelled out to the plugin's `qa_check.py`. That same
+   plugin ships a `stop_qa.py` Stop hook which **blocks the arm until `qa_check` returns clean**.
+   The check could therefore only ever report `pass`. It did — 3 of 3 turns — and the delivered
+   deck scored `count: 0`. A guaranteed-green row occupying a slot and looking like a criterion.
+
+3. **It forces an asymmetric check list, which breaks the comparison.** A check only one arm can
+   run grades only one arm. There is no comparison in that column, and every downstream
+   pass-count silently stops being like-for-like.
+
+**If the criterion is real, write a generic checker for it.** The plugin validates its own
+export? Write a check that opens the output file and asserts what a good export looks like,
+using a library that can measure either arm's output. That check grades control too, which is
+the entire point.
 
 List `testenvRoot/.dod/checks/` first — reuse an existing id if a prior run already covers the
-same intent, don't duplicate.
+same intent, don't duplicate. **Reusing an id does not inherit its correctness.** A check
+written against a prior run's artifact shape has never seen this run's; step 4e is what settles
+that, and it is the step that has failed most often.
 
 ### 4c. Author real check files into `testenvRoot/.dod/checks/`
 
@@ -235,10 +245,10 @@ dod-lite's exact format (id = filename without extension, unique within `checks/
 match exactly one file — `foo.py` and `foo.md` together are the same check declared twice and are
 rejected, not silently resolved.
 
-- **script**: `<id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb` — actual working exit-code logic (0 = pass). If
-  reusing a plugin-native script, copy it in verbatim (or reference it if it needs no changes to run
-  standalone). Declared metadata goes in a `<id>.meta.json` sidecar, since an executable has
-  nowhere to put frontmatter:
+- **script**: `<id>.mjs|.js|.cjs|.sh|.ps1|.py|.rb` — actual working exit-code logic (0 = pass).
+  Written here, from scratch or from a prior run's generic check — never lifted from the
+  artifact under test (4b). Declared metadata goes in a `<id>.meta.json` sidecar, since an
+  executable has nowhere to put frontmatter:
   ```json
   { "description": "one line", "seed_expectation": "fail" }
   ```
@@ -277,11 +287,18 @@ check FILES in `.dod/checks/` are the experiment-level shared/reused state.
   "schema": 1,
   "run": "run-NNN",
   "checks": {
-    "control": [ { "id": "...", "tier": "script|prompt", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ],
-    "test":    [ { "id": "...", "tier": "script|prompt", "source": "generic"|"plugin-native", "origin": "<path, if plugin-native>" } ]
+    "control": [ { "id": "...", "tier": "script|prompt", "source": "generic" } ],
+    "test":    [ { "id": "...", "tier": "script|prompt", "source": "generic" } ]
   }
 }
 ```
+
+**`source` has exactly one legal value: `"generic"`.** `"plugin-native"` and its companion
+`origin` field are RETIRED — see 4b. Anything downstream that still describes an asymmetric
+check list as expected is describing behaviour that no longer exists.
+
+**The two arms' lists must be identical.** Same ids, same tiers, same order. If you are about
+to write different lists, the criterion driving the difference belongs in 4b's bin, not here.
 
 The `arm-session-start.mjs` hook reads this file at fire time and seeds each arm's
 `.dod/sessions/<session_id>.json` with exactly this list — that's what makes checks apply
@@ -292,22 +309,97 @@ If the user wants to skip DoD tracking for this run entirely: don't write `dod-c
 (optimizer degrades gracefully — analysis then leans on metrics + human verdict only). Say so plainly
 before moving on.
 
-### 4e. Prove the checks discriminate — MANDATORY, before the run is fireable
+### 4e. Prove every check works — TWO-SIDED, MANDATORY, before the run is fireable
 
-Every check you just authored has never been executed. Its first run used to be inside a live arm,
-where a bug becomes `fail` (blocks the arm, contaminates the run) or `error` (never blocks, silently
-ungraded) — and neither surfaces until analyze, a whole run later.
+**This is the step that has failed more than any other, and it has failed the same way every
+time.** Read this before writing a fixture, not after.
 
-Run the gate:
+A check must be proven in BOTH directions:
+
+- **negative side** — it FAILS on work that is wrong (or absent). The seed probe does this.
+- **positive side** — it PASSES on work that is right. **Nothing before run-008 tested this
+  mechanically, and it is where every real defect has been.**
+
+A check that fails on everything looks exactly like a strict criterion. It grades both arms
+identically, it reads as a real result in the report, and nothing anywhere says otherwise.
+
+**run-007, the run that made this mandatory.** Three of seven reported DoD failures were the
+checkers being wrong, not the decks:
+
+| check | what it did | what was true |
+|---|---|---|
+| `status-rules-applied` | failed BOTH arms on the run's central trap | both decks carried all seven correct statuses. It read a *"Lead's own view"* column as the deck's own assertion |
+| `escalation-cap-honoured` | failed control | control escalated exactly the right four. The check read control's *working* slide — the one showing which items failed the test — and counted the rejects as escalations. It penalised the arm for showing its reasoning |
+| `movement-explained` | failed both arms, flipped pass→fail mid-run with no deck change | a prompt-tier check that cannot open `.pptx` in its own spawn environment. It was grading its own tooling |
+
+Fixtures **were** built and run before that run fired. They still missed it, for one reason
+worth internalising: **the fixtures modelled the artifact shape I imagined, not the shapes the
+arms actually produce.** Control put its statuses in floating text boxes over an empty-celled
+table. Test put them in badge cards beside a table with an extra lead's-view column. One correct
+answer, two renderings, one check, both misread.
+
+#### Build the fixtures — from real artifacts, not from imagination
+
+Under `runs/run-NNN/fixtures/`:
+
+```
+fixtures/
+  pass/          a workspace whose artifact is CORRECT on every graded criterion
+  pass-alt/      the same correct answers, a STRUCTURALLY DIFFERENT rendering
+  fail/          a workspace that gets the traps wrong
+  fail-alt/      (optional) a different way of being wrong
+```
+
+`pass*` and `fail*` are matched by prefix, so add as many variants as the criteria need.
+
+**Scoping, via an optional `expect.json` inside a fixture dir:**
+
+```json
+{ "checks": ["status-rules-applied", "escalation-cap-honoured"] }
+```
+
+The two sides default differently, because they guard different things:
+
+- **`pass*` is strict by default** — every check must pass on correct work. Declare `checks`
+  only when a fixture genuinely cannot satisfy something (no rendered images to score, say);
+  needing an exemption is a claim about the fixture and should be written down.
+- **`fail*` is informational by default** — "wrong" is per-criterion. A fixture that is
+  semantically wrong on every trap is still a structurally valid file, so a
+  file-validity check passes on it and should. Requiring every check to fail on every fail
+  fixture forces one fixture per check for no gain: the seed probe already rejects any check
+  that can never fail. Declare `checks` to make a fail fixture a **hard** gate for exactly the
+  checks it was built to trip.
+
+Results outside a fixture's declared scope still print, marked `~`, so a surprising cell is
+never hidden behind a blank.
+
+Three rules, all learned the expensive way:
+
+1. **At least one `pass*` fixture is required.** The gate refuses to green without one. There
+   is no flag to skip it.
+2. **Where a prior run's delivered artifact exists, build a variant from IT** — copy the real
+   file in and correct only the graded values. That is the one source of artifact shapes you
+   did not invent. run-006's two decks were sitting on disk during run-007's planning and were
+   never used.
+3. **Any check that parses structured output needs ≥2 `pass*` variants** rendering the same
+   correct answer differently — table vs. prose, cells vs. overlaid boxes, merged vs. split
+   columns. The gate warns when it sees only one; take the warning seriously, because a
+   single-shape fixture is exactly what passed before run-007 and caught nothing.
+
+#### Run the gate
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/probe-checks.mjs" "<testenvRoot>" "<runDir>"
 ```
 
-It clones `seed/` into a throwaway workspace and executes every check against it, then rejects:
+It clones `seed/` into a throwaway workspace, runs every check against it, then runs every
+check against every `pass*` and `fail*` fixture, and rejects:
 
 | Rejection | What it means |
 |---|---|
+| `NO PASS FIXTURE` | nothing proves this check can ever pass. Build one (see above) |
+| `FALSE NEGATIVE` | it failed on a fixture declared correct. **This is the run-007 defect.** The check is wrong, not the fixture — fix the check first, and only edit the fixture if the fixture is genuinely not correct work |
+| `FALSE POSITIVE` | it passed on a `fail*` fixture — it does not detect the thing it exists for |
 | `CANNOT DISCRIMINATE` | it already passes on an untouched seed, so it passes for both arms no matter what they do |
 | `CRASHED` | it exited non-zero because it broke, not because the criterion failed |
 | `BROKEN` / `MISSING` | it errored, or the file referenced in `dod-checks.json` isn't there |
@@ -315,19 +407,29 @@ It clones `seed/` into a throwaway workspace and executes every check against it
 | `DECLARED A REGRESSION GUARD` | `seed_expectation: pass` but it fails on the seed |
 | `UNSUPPORTED` | a `type: human` check. The tier is gone; re-author it or judge it at analyze |
 
-**Do not proceed while anything is rejected.** Fix the check and re-run — don't relax
-`seed_expectation` to make the gate quiet, which converts a real signal into a decorative one. If a
-criterion genuinely can't be checked yet, drop it and say so.
+**Do not proceed while anything is rejected, and do not make the gate quiet instead of
+correct.** Relaxing `seed_expectation`, deleting a fixture, or loosening a fixture's expected
+values to get green converts a real signal into a decorative one — which is the failure this
+whole step exists to prevent.
 
-This costs one seed clone plus N executions, and prompt checks are N real `claude -p` calls. Say so
-before running it if the check list is large.
+**Report the gate's output to the user before saying the run is ready.** Not "checks verified"
+— the actual table, with the fixture count per check. Seven runs of "verified" that meant
+"probed against the seed once" is why this paragraph is here.
 
-`/optimizer:fire` runs the same probe again and refuses to launch on a mismatch, so a check edited
-between planning and firing can't slip through.
+This costs one seed clone, N fixture workspaces, and N×(1+fixtures) executions; prompt checks
+are that many real `claude -p` calls. Say so before running it if the list is large. It is
+cheaper than one contaminated run by two orders of magnitude.
+
+`/optimizer:fire` runs the same probe again and refuses to launch on a mismatch, so a check
+edited between planning and firing can't slip through.
 
 ## 5. Confirm ready
 
 Tell the user: `run-NNN planned. Fire with /optimizer:fire when ready.`
-Checklist to state: control baseline this run (vanilla, or previous-version@ref), task.md written
-(plugin-blind ✓), `dod-checks.json` present (with control/test counts and any plugin-native checks
-called out) or explicitly skipped.
+Checklist to state:
+- control baseline this run (vanilla, or previous-version@ref)
+- `task.md` written, plugin-blind ✓
+- `dod-checks.json` present — state the check count, confirm **both arms' lists are identical**,
+  and confirm **every check is `source: "generic"`** — or say DoD was explicitly skipped
+- **the 4e gate's actual output table**, including how many `pass*` and `fail*` fixtures each
+  check was proven against. Do not summarise this as "checks verified"; paste the table.

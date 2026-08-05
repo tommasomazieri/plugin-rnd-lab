@@ -37,10 +37,12 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<configRoot>" "<testenvRoot>
 Then read `runs/run-NNN/.launch/parity-report.json` and show the user a terse summary:
 - what BOTH arms share (model, prompt, common plugins/MCPs)
 - what ONLY control gets, what ONLY test gets
-- `dod_checks` + `dod_checks_note`: whether `dod-checks.json` exists (warn if missing: run proceeds
-  without DoD tracking) and whether control/test check lists differ. A difference is fine IF it's
-  explained by a plugin-native checker (check each item's `source`) — surface it as a fact, not
-  automatically as a problem.
+- `dod_checks`, `dod_checks_note`, `dod_checks_non_generic`: whether `dod-checks.json` exists
+  (warn if missing: run proceeds without DoD tracking), whether control/test check lists differ,
+  and whether any check declares a non-generic `source`. **Either one is a defect that blocks
+  the run.** A check only one arm can run grades only one arm, so that column holds no
+  comparison; and a check that runs the artifact's own tooling is measuring whether the artifact
+  satisfies itself. The old plugin-native exemption is retired — see `/optimizer:plan` 4b.
 
 Also read and report `pins`, `pins_symmetric` and `pins_dirty`:
 - **`pins`** — the resolved identity of every artifact on both arms. This is what the run is
@@ -54,8 +56,9 @@ Also read and report `pins`, `pins_symmetric` and `pins_dirty`:
   output are excluded from the arm's metrics. Mention it, because it changes how the
   numbers should be read.
 
-If anything looks asymmetric beyond the declared deltas AND beyond a documented plugin-native
-checker difference, STOP and fix env.json or `dod-checks.json` before firing.
+If anything looks asymmetric beyond the declared artifact deltas, STOP and fix env.json or
+`dod-checks.json` before firing. DoD check lists must match exactly, and every check must be
+`source: "generic"`.
 
 ## 1b. Re-prove the DoD checks still discriminate
 

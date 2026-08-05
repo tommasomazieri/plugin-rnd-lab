@@ -197,22 +197,41 @@ passed in by hand anymore.
   "run": "run-003",
   "checks": {
     "control": [
-      { "id": "output-file-exists", "tier": "script", "source": "generic" }
+      { "id": "output-file-exists", "tier": "script", "source": "generic" },
+      { "id": "mesh-manifold", "tier": "script", "source": "generic" }
     ],
     "test": [
       { "id": "output-file-exists", "tier": "script", "source": "generic" },
-      { "id": "blender-mesh-valid", "tier": "script", "source": "plugin-native",
-        "origin": "blender-plugin/checks/mesh-valid.py" }
+      { "id": "mesh-manifold", "tier": "script", "source": "generic" }
     ]
   }
 }
 ```
 
-**Control and test check lists are allowed to differ.** When a criterion is genuinely checkable only
-via a checker script the plugin-under-test ships (its own QA/validation tooling), the TEST arm uses
-that native checker and CONTROL either gets a generic equivalent or no check for that criterion at
-all. `source` records which case applies so `/optimizer:analyze` can EXPLAIN the asymmetry instead of
-misreading it as a broken parity. Deliberate design, not a bug.
+**Control and test check lists MUST be identical, and `source` has exactly one legal value:
+`"generic"`.**
+
+This reverses an earlier rule. `"plugin-native"` and its companion `origin` field are **retired**.
+A check used to be allowed to run the plugin-under-test's own QA tooling, with the resulting
+asymmetry recorded so analyze could explain rather than flag it. Three things were wrong with that,
+any one of them sufficient:
+
+1. A check only one arm can run **grades only one arm**. That column contains no comparison, and
+   every downstream pass-count silently stops being like-for-like.
+2. A criterion the artifact already enforces internally **cannot fail**. run-007 shipped
+   `qa-gate-clean`, which shelled out to the plugin's `qa_check.py`; the same plugin ships a Stop
+   hook that blocks the arm until `qa_check` returns clean. It reported `pass` on 3 of 3 turns and
+   could not have done otherwise — a guaranteed-green row that looked like a criterion.
+3. The artifact under test must function **autonomously, as if no DoDs existed**. DoD checks are
+   the operator's acceptance criteria, fixed from outside. A check that *is* the plugin's own gate
+   asks only whether the plugin satisfies itself.
+
+If the criterion is real, write a generic checker that grades the OUTPUT using tooling independent
+of the artifact — so it grades control too, which is the point. If it can only be expressed by
+running the artifact's own tooling, it is not a DoD criterion. See `/optimizer:plan` 4b.
+
+`launch-pair.mjs` records both violations in `.launch/parity-report.json`
+(`dod_checks_asymmetric`, `dod_checks_non_generic`) and `/optimizer:fire` blocks on either.
 
 ## Why a junction is still required
 
@@ -342,10 +361,11 @@ marks `turn_counts.note` INCOMPLETE if a counter is ever missing at analyze time
    mapped to a `mandate.md` section. There are two tiers; a criterion needing this user's taste
    is not a check, it is the quality verdict given at `/optimizer:analyze` against the rubric.
    Budget the prompt tier: each prompt check bills one grader subprocess per turn per arm.
-2. Check whether the plugin-under-test ships its own checker-like scripts (a `checks/`, `qa/`,
-   `validators/` folder, or anything its README/SKILL.md documents as QA/validation tooling) BEFORE
-   writing a generic check for a criterion those scripts already cover — use the plugin's own script
-   instead, tagged `source: "plugin-native"` in `dod-checks.json`.
+2. NEVER use the artifact's own checkers. Every check is generic, grades the OUTPUT with tooling
+   independent of the plugin-under-test, and runs identically in both arms. Its `checks/`, `qa/`,
+   `validators/` folder, its Stop-hook gate, its lint, its self-scoring rubric — all off limits.
+   A criterion the artifact already enforces internally cannot fail, and a check only one arm can
+   run grades only one arm.
 3. Write REAL, working check files into `<testenvRoot>/.dod/checks/<id>.<ext>` — scripts with actual
    exit-code logic, `.md` files with real self-contained grading questions. These get executed
    for real by dod-lite's `Stop` hook every turn. No placeholders. Every check declares a
@@ -373,8 +393,9 @@ anything.
 - `analysis/delivery.json` — per arm, did it actually deliver. An arm that quit early looks cheap
   and fast on every countable pillar, so a run with any `delivered: false` yields no regression
   point and an `inconclusive` hypothesis.
-- `runs/run-NNN/dod-checks.json` — to explain (not flag as a violation) any control/test check-list
-  asymmetry sourced from a plugin-native checker.
+- `runs/run-NNN/dod-checks.json` — the check lists must be identical across arms and every check
+  `source: "generic"`. Any divergence is a defect to report, and any pass-count built on an
+  asymmetric list is not like-for-like.
 - `runs/run-NNN/manifest.json` → `arms.<arm>.artifacts[]` — what each arm actually ran against.
   This is what `comparison.json`'s `pins` is derived from, and what tells the comparator which
   artifact is even eligible to be named as a cause.

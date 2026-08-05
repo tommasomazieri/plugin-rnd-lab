@@ -102,14 +102,14 @@ against it.
 
 - Both arms: same model, same opening prompt (fixed constant), same seed files, same task.md,
   `--strict-mcp-config` + explicit `enabledPlugins` (no global-config bleed).
-- Arms differ ONLY in the `control`/`test` blocks of env.json — PLUS, deliberately, in DoD checks
-  that depend on the plugin-under-test's own checker tooling (`dod-checks.json` "source":
-  "plugin-native"). `.launch/parity-report.json` records exactly this split per run, including
-  whether the DoD check lists differ and why.
+- Arms differ ONLY in the `control`/`test` blocks of env.json. **DoD checks are identical across
+  both arms** — same ids, all `source: "generic"`. `.launch/parity-report.json` records any
+  divergence per run (`dod_checks_asymmetric`, `dod_checks_non_generic`) and `/optimizer:fire`
+  blocks on either.
 - User behavior after the opening prompt is free — asymmetries (extra prompts, compactions,
   /clear) are measured as bias indicators, never silently ignored.
 - Registration/linkage is pure hook work (`skills/fire/scripts/arm-session-start.mjs`) — zero agent
-  tokens, symmetric by construction (except the intentional plugin-native check asymmetry above).
+  tokens, symmetric by construction.
 - BOTH arms' identities can vary run to run within the same env — never silently assumed,
   always resolved to an immutable snapshot and recorded in `manifest.json` + a `ledger.md`
   column. See "Artifacts and pinning" below.
@@ -150,9 +150,9 @@ Worktrees sidestep the plugin cache entirely — Claude Code tracks only ONE "cu
 per plugin name, while `--plugin-dir` loads straight from a folder. Two arms can therefore run
 two versions of the same plugin simultaneously.
 
-`/optimizer:plan`'s checker-discovery step also looks inside each arm's pinned snapshot for the
-artifact's OWN shipped checker scripts, so a previous-version arm's plugin-native DoD checks
-run the OLD checker against the OLD code — not today's checker against yesterday's code.
+DoD checks never reach into those snapshots. They are generic by rule (`/optimizer:plan` 4b) and
+identical across both arms, so an arm's pinned version changes what it *produces*, never how it is
+*graded*.
 
 ## Continuity: `lab/`
 
@@ -212,8 +212,7 @@ every run:
    `.dod/` via a directory junction (still required — the engine resolves `.dod` as a direct child
    of cwd, no upward search),
 3. `arm-session-start.mjs` is the sole writer of `.dod/sessions/<session_id>.json` — it seeds both
-   arms with the SAME check ids (or intentionally different ones, per plugin-native provenance)
-   directly, with no foreign hook to race or wait for.
+   arms with the SAME check ids directly, with no foreign hook to race or wait for.
 
 optimizer degrades gracefully when no `dod-checks.json` exists for a run — analysis then leans on
 metrics + human verdict only. That's the only way to skip DoD tracking now; the engine itself is

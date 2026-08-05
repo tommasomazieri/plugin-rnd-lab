@@ -561,9 +561,21 @@ function main() {
     const controlIds = (dodChecks.checks?.control || []).map((c) => c.id).sort().join(',');
     const testIds = (dodChecks.checks?.test || []).map((c) => c.id).sort().join(',');
     parity.dod_checks_asymmetric = controlIds !== testIds;
+    // Asymmetry used to be excused when a check came from the artifact's own tooling. That
+    // exemption is RETIRED (see /optimizer:plan 4b). A check only one arm can run grades only
+    // one arm, so its column holds no comparison and every downstream pass-count quietly stops
+    // being like-for-like. run-007's `qa-gate-clean` was the last of them: it re-ran the
+    // plugin's own gate, which the plugin's own Stop hook already blocked the arm until it
+    // passed, so it could only ever report `pass`. It did, on every turn, and measured nothing.
+    const nonGeneric = ['control', 'test']
+      .flatMap((a) => (dodChecks.checks?.[a] || []).map((c) => ({ arm: a, ...c })))
+      .filter((c) => c.source && c.source !== 'generic');
+    parity.dod_checks_non_generic = nonGeneric.map((c) => `${c.arm}:${c.id} (source="${c.source}")`);
     parity.dod_checks_note = parity.dod_checks_asymmetric
-      ? 'control/test check lists differ — expected when driven by a plugin-native checker (see "source" per check), not a parity violation by itself'
-      : 'control/test check lists identical';
+      ? 'DEFECT: control/test check lists differ — a check only one arm can run grades only one arm. Make the lists identical before firing.'
+      : nonGeneric.length > 0
+        ? `DEFECT: ${nonGeneric.length} check(s) declare a non-generic source — a DoD check must not run the artifact's own tooling (see /optimizer:plan 4b)`
+        : 'control/test check lists identical, all checks generic';
   } else {
     parity.dod_checks = null;
     parity.dod_checks_note = 'no runs/run-NNN/dod-checks.json — run proceeds without DoD tracking';
