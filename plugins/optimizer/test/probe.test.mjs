@@ -10,7 +10,15 @@ import { SCRIPTS, makeEnvPair, makeRun, cleanupAll, write, node, nodeExpectFail 
 
 test.after(cleanupAll);
 
-function setup(checks, dodChecks) {
+/**
+ * `fixtures` maps a fixture dir name (`pass`, `pass-alt`, `fail`, …) to the files that
+ * make up that workspace. At least one `pass*` fixture is REQUIRED by the gate and there
+ * is no flag to skip it, so any test that expects the probe to exit 0 must supply one —
+ * a check nothing proves can ever PASS grades both arms identically while looking like a
+ * criterion. Tests asserting a rejection can omit fixtures; they are rejected on their
+ * own defect first.
+ */
+function setup(checks, dodChecks, fixtures = {}) {
   const { testenvRoot } = makeEnvPair(
     { schema: 1, experiment: 'e', model: 'claude-sonnet-5' },
     { seed: { 'existing.txt': 'already here\n' } },
@@ -19,12 +27,25 @@ function setup(checks, dodChecks) {
   for (const [name, contents] of Object.entries(checks)) {
     write(path.join(testenvRoot, '.dod', 'checks'), name, contents);
   }
+  for (const [fixtureName, files] of Object.entries(fixtures)) {
+    for (const [rel, contents] of Object.entries(files)) {
+      write(path.join(runDir, 'fixtures', fixtureName), rel, contents);
+    }
+  }
   fs.writeFileSync(
     path.join(runDir, 'dod-checks.json'),
     JSON.stringify({ schema: 1, run: 'run-001', checks: dodChecks }, null, 2),
   );
   return { testenvRoot, runDir };
 }
+
+/** A correct workspace: the seed file survives AND the deliverable was produced. */
+const passFixture = (...delivered) => ({
+  pass: {
+    'existing.txt': 'already here\n',
+    ...Object.fromEntries(delivered.map((f) => [f, 'delivered\n'])),
+  },
+});
 
 /** exit 0 iff `rel` exists in the workspace — the archetypal "did they do it" check. */
 const existsCheck = (rel) => `import fs from 'node:fs';process.exit(fs.existsSync(${JSON.stringify(rel)}) ? 0 : 1);`;
@@ -33,10 +54,11 @@ test('accepts a check that correctly fails on the seed', () => {
   const { testenvRoot, runDir } = setup(
     { 'made-thing.mjs': existsCheck('THING.md') },
     { control: [{ id: 'made-thing' }], test: [{ id: 'made-thing' }] },
+    passFixture('THING.md'),
   );
   const out = node(SCRIPTS.probeChecks, [testenvRoot, runDir]);
-  assert.match(out, /all 1 check\(s\) behave as declared/);
-  assert.match(out, /made-thing.*script.*fail.*fail.*OK/s);
+  assert.match(out, /all 1 check\(s\) fail on the seed, pass on every correct fixture/);
+  assert.match(out, /made-thing.*script.*fail.*fail.*pass.*OK/s);
 });
 
 test('REJECTS a check that already passes on an untouched seed', () => {
@@ -97,6 +119,7 @@ test('ACCEPTS a declared regression guard that passes on the seed', () => {
       'still-there.meta.json': JSON.stringify({ seed_expectation: 'pass', description: 'seed file survives' }),
     },
     { control: [{ id: 'still-there' }], test: [{ id: 'still-there' }] },
+    passFixture(),
   );
   const out = node(SCRIPTS.probeChecks, [testenvRoot, runDir]);
   assert.match(out, /still-there.*script.*pass.*pass.*OK/s);
@@ -131,6 +154,7 @@ test('probes the union of both arms, and --ids overrides', () => {
   const { testenvRoot, runDir } = setup(
     { 'a.mjs': existsCheck('A.md'), 'b.mjs': existsCheck('B.md') },
     { control: [{ id: 'a' }], test: [{ id: 'b' }] },
+    passFixture('A.md', 'B.md'),
   );
   const out = node(SCRIPTS.probeChecks, [testenvRoot, runDir]);
   assert.match(out, /probed 2 check\(s\)/, 'asymmetric arms are both covered');
@@ -143,6 +167,7 @@ test('--json emits a machine-readable report', () => {
   const { testenvRoot, runDir } = setup(
     { 'a.mjs': existsCheck('A.md') },
     { control: [{ id: 'a' }], test: [{ id: 'a' }] },
+    passFixture('A.md'),
   );
   const parsed = JSON.parse(node(SCRIPTS.probeChecks, [testenvRoot, runDir, '--json']));
   assert.equal(parsed.probed, 1);
@@ -155,8 +180,13 @@ test('the probe workspace is disposable and the real checks are never touched', 
   const { testenvRoot, runDir } = setup(
     { 'nosy.mjs': "import fs from 'node:fs';fs.writeFileSync('.dod/checks/INJECTED.txt','x');process.exit(1);" },
     { control: [{ id: 'nosy' }], test: [{ id: 'nosy' }] },
+    passFixture('THING.md'),
   );
-  node(SCRIPTS.probeChecks, [testenvRoot, runDir]);
+  // `nosy` exits 1 on every workspace, so the gate rightly rejects it as a FALSE NEGATIVE.
+  // That is not what this test is about — the assertion is containment: whatever a check
+  // writes during the probe must land in the disposable workspace, never in the shared
+  // checks folder. Run it for the side effects and ignore the (correct) rejection.
+  nodeExpectFail(SCRIPTS.probeChecks, [testenvRoot, runDir]);
   assert.ok(
     !fs.existsSync(path.join(testenvRoot, '.dod', 'checks', 'INJECTED.txt')),
     'a check writing into .dod during the probe must not reach the shared checks folder',

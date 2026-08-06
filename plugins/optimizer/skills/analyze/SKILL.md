@@ -247,13 +247,25 @@ will spend a whole run on whatever ranks first.
 Its `## Harness defects` section goes nowhere near the ledger. Those are optimizer/dod-lite
 bugs — report them to the user in step 7 and leave the artifact's ledger clean.
 
-**If this was a regression run** (the frozen task in `lab/regressions/`), also record the
-absolute point — this is the only thing that ever becomes a curve:
+**Record the absolute point for EVERY run.** Not only regression runs — this is what makes
+"has the priority pillar ever actually moved?" a question with an answer:
 
 ```bash
 node ".../lab-cli.mjs" regression "<testenvRoot>" --run run-NNN --rubric-version <v> \
-    --arms '{"control":{...},"test":{...}}'
+    --kind <frozen|run> --arms '{"control":{...},"test":{...}}'
 ```
+
+- `--kind frozen` — this run used the frozen regression task from `lab/regressions/`. These
+  points are the only true like-for-like curve.
+- `--kind run` — an ordinary run. Its task differs from every other run's, so these are **not
+  a curve** and must never be plotted as one. They are the per-run record that lets anyone ask
+  the question at all.
+
+This used to be conditional on being a regression run, and consultant consequently reached
+run-007 with an empty `lab/regressions/` and eight runs of unmeasured trajectory — the priority
+pillar was missed eight times consecutively with nothing anywhere saying so. `/optimizer:plan`
+now reports coverage from these points at step 0b, so a run that skips this hides the miss from
+the next planner too.
 
 ## 5. Write analysis/report.md
 
@@ -302,6 +314,64 @@ If the run hit a stop condition from step 3, the report is just: what was compar
 verdict, the deterministic table, the parity flags, and a "What to fix before re-firing" list.
 No verdict, no score, no hypotheses opened.
 
+## 5b. Write analysis/fix-list.md — the work order
+
+**This file has a different reader than report.md, and that is the entire point.**
+
+`report.md` is the evidentiary record: it answers *what happened*, and its `Hypotheses opened`
+section feeds the next `/optimizer:plan` cycle. A hypothesis is a thing to **test**.
+
+`fix-list.md` is handed to a separate plugin-manager session that is going to **build**. That
+session has read nothing else — not the report, not the transcripts, not `lab/hypotheses.json`.
+Handing it hypothesis one-liners (`H-014 — cheap pre-render static lint · mag 20 · conf 0.5 ·
+cost 3`) makes it go find the report, find the run, and reconstruct the evidence before it can
+touch a file. Runs 005–007 shipped exactly that and nothing structural was ever built from them.
+
+Write it in the shape run-004 used, which an implementer could act on cold:
+
+```markdown
+# <experiment> — run-NNN fix list (<date>)
+
+Generated for a session that has read nothing else. Every path is absolute.
+Ordered by priority. Nothing here is a hypothesis to test — these are changes to make.
+
+## PRIORITY 1 — <pillar this moves, e.g. input_tokens>
+
+### 1. <imperative one-line title>
+- **File(s):** `<absolute path>`, function/symbol `<name>` where applicable
+- **Change:** <what to do, concretely enough to start typing>
+- **Evidence:** <the measured number from THIS run that justifies it, with its source —
+  "test spent ~15.5 min / ~22 tool calls reading 6 reference docs (digest-test.json,
+  L104-L212)". Never "the analysis suggests">
+- **Expected effect:** <which pillar, roughly how much, and what would show it worked>
+- **Do NOT:** <the adjacent change that would break something — omit if none>
+
+### 2. ...
+
+## PRIORITY 2 — ...
+
+## Deliberately not doing
+<changes the evidence points at that you are choosing to skip, and why. Keeps the next run
+from re-opening them.>
+```
+
+Rules that keep it actionable:
+
+- **Absolute paths, named functions.** A path the implementer has to search for is a path
+  they will guess at.
+- **Every item cites a measured number from this run**, with where it came from. An item with
+  no number is a hunch and belongs in `Hypotheses opened` instead.
+- **Priority is by the objective's priority pillar**, not by how interesting the finding is.
+- **Harness defects never appear here.** They target optimizer/dod-lite and go to the report's
+  own section — a plugin-manager session editing the artifact must not be handed instrument
+  bugs it has no business touching.
+- **An item may legitimately also be a hypothesis.** Say so and cross-reference the id: build
+  it now, and let the next run measure whether it worked.
+- If the evidence genuinely supports no concrete change, write `No actionable changes this
+  run` and say what would have been needed. Do not pad it.
+
+Then tell the user this file exists and what it is for — it is the artifact they hand onward.
+
 ## 6. Append the ledger row
 
 Add to `testenvRoot/ledger.md`: run, the pins both arms ran against (read
@@ -316,12 +386,16 @@ outcome, subjective score, single most important delta, relative path to report.
 
 Tell the user three things, in this order:
 
-1. **The top-ranked open hypothesis** — run `node ".../lab-cli.mjs" rank "<testenvRoot>"` after
-   4d rather than guessing which of the new ones wins. That is the actual answer to "what next".
-2. **Any harness defect** from the report's last section, separately and plainly. A broken
+1. **`analysis/fix-list.md`** — the work order from 5b, by absolute path, described as the
+   thing to hand to the session that will edit the plugin. This goes first because it is the
+   only output of the whole run that changes the artifact.
+2. **The top-ranked open hypothesis** — run `node ".../lab-cli.mjs" rank "<testenvRoot>"` after
+   4d rather than guessing which of the new ones wins. That is the answer to "what to test next",
+   which is a different question from "what to build next".
+3. **Any harness defect** from the report's last section, separately and plainly. A broken
    check or a mis-scoped deny rule silently distorts every future run, so it outranks the
    artifact work even though it is less interesting.
-3. The reminder below.
+4. The reminder below.
 
 Apply fixes to the plugin-under-test in ITS OWN repo — which, unlike before, is very likely the SAME repo this main session is already CD'd into;
 don't confuse "editing the plugin" with "touching `.ab-bench/` or the testenv folder," those are

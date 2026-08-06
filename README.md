@@ -188,6 +188,50 @@ For how optimizer actually works under the hood — experiment folder layout, th
 parity rules, per-script ownership — see **`plugins/optimizer/README.md`**. This file is the
 "how do I get started" doc; that one is the "how does it work" doc.
 
+## Who writes what
+
+Four plugins share a working directory, so every artifact has exactly one writer. Anything with
+two unreconciled writers is a bug, not a feature.
+
+| artifact | written by | read by | notes |
+|---|---|---|---|
+| `.ab-bench/state.json` | `optimizer:init` | every optimizer skill | absolute machine paths — why `.ab-bench/` is gitignored |
+| `.ab-bench/<mandate>/mandate.md` | `optimizer:understand` | `plan`, `analyze`, the comparator agent | `prospector:handoff` may **seed** it; `understand` §0 then imports rather than re-interviewing, and `handoff` refuses to overwrite a mandate a live experiment is anchored to |
+| `.ab-bench/<mandate>/quality-rubric.md` | `optimizer:understand` §3b | `analyze` §3b, `paper` | same seed-then-import path as `mandate.md`. §3b-ii owns amendments and `rubric_version` bumps |
+| `.ab-bench/<mandate>/envs/<env>/env.json` | `optimizer:init` | `fire`, `analyze` | **never edited after a run fires against it** — new config = new env |
+| `runs/run-NNN/task.md` | `optimizer:plan` | both arms (verbatim) | must stay plugin-blind |
+| `runs/run-NNN/dod-checks.json` | `optimizer:plan` | `fire`, dod-lite | both arms get an identical list, all `source: generic` |
+| `.dod/checks/*` | `optimizer:plan` | dod-lite's Stop hook | arms can neither read nor write these |
+| `.dod/sessions/*.json` | `optimizer` seeds, dod-lite updates `state`/`history` | `analyze` | the sole shared-state exception, and the reason `.dod/` is denied to arms in both directions |
+| `runs/run-NNN/analysis/report.md` | `optimizer:analyze` | you, `paper` | the evidentiary record |
+| `runs/run-NNN/analysis/fix-list.md` | `optimizer:analyze` §5b | the plugin-manager session | the work order — different reader, on purpose |
+| `lab/objective.json` | `optimizer:plan` step 0b | `plan`, `analyze`, `paper` | one priority pillar + guards |
+| `lab/hypotheses.json` | `optimizer:analyze` §4d (add), `plan` (resolve) | `plan` step 0b ranking | |
+| `lab/regressions/points.json` | `optimizer:analyze` | `plan` step 0b coverage, `paper` | one point per run, `kind: frozen` vs `run` |
+| `.prospector/**` | prospector skills only | `prospector:handoff` | tracked in git — the record is part of the deliverable |
+
+`core` writes nothing. `dod-lite` writes only `state`/`history` inside `.dod/sessions/*.json`.
+
+### Settled — do not re-open
+
+**dod-lite is a separate plugin, permanently.** An arm session must load the auditor and
+nothing else; folding it into optimizer would enable optimizer's own skills — `plan`, `fire`,
+`analyze` — inside the very sessions being measured, and an arm that can invoke `/optimizer:plan`
+can design its own Definition-of-Done. It is registered in `marketplace.json` only so it caches
+alongside optimizer, because an installed plugin cannot reach files outside its own directory.
+Full rationale: `plugins/optimizer/docs/dod-contract.md`, and `/core:learn chain`.
+
+**`quality-rubric.md` has one owner:** `/optimizer:understand` §3b, with §3b-ii owning
+amendments and `rubric_version` bumps. `/prospector:handoff` may seed it at handoff; `understand`
+§0 then imports rather than re-interviewing, and `handoff` refuses to overwrite a mandate a live
+experiment is anchored to. One writer per entry path, reconciled explicitly — not a conflict.
+
+**A DoD check may never be the artifact's own gate.** `source` has one legal value, `generic`,
+and both arms get an identical check list. A check that shells out to the plugin's own validator,
+where that plugin also ships a Stop hook blocking until the same validator passes, can only ever
+report `pass`. Everything that lives in the plugin must function autonomously, as if no DoDs
+existed.
+
 ## Adding another plugin to this marketplace
 
 Add a folder under `plugins/<name>/` with its own `.claude-plugin/plugin.json`, then add an entry

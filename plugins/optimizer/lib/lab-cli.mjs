@@ -39,6 +39,50 @@ function fail(msg) {
   process.exit(1);
 }
 
+/**
+ * Says out loud when the priority pillar has never actually moved.
+ *
+ * consultant ran eight times with `input_tokens` as the declared priority and never once
+ * confirmed a cost reduction — every fired cost hypothesis targeted how MANY times something
+ * happened, while the cost function turned out to be dominated by context size per call
+ * (+8% calls vs +95% median context, run-007). Nobody noticed across eight runs because the
+ * only place that fact existed was a ledger row nobody aggregates. A programme that keeps
+ * missing its own target should have to read that sentence before planning the next run.
+ */
+function printPriorityCoverage(root, objective) {
+  if (!objective?.priority) return;
+  const priority = objective.priority;
+  const resolved = (readHypotheses(root).hypotheses || []).filter((h) => h.status !== 'open');
+  const onPriority = resolved.filter((h) => (h.target_pillars || []).includes(priority));
+  const points = regressionSeries(root).flatMap((s) => s.points);
+
+  if (onPriority.length === 0 && points.length === 0) return;
+
+  const byOutcome = new Map();
+  for (const h of onPriority) byOutcome.set(h.outcome || h.status, (byOutcome.get(h.outcome || h.status) || 0) + 1);
+  const tally = [...byOutcome].map(([o, n]) => `${n} ${o}`).join(', ');
+  const wins = onPriority.filter((h) => h.outcome === 'confirmed' || h.outcome === 'won-at-a-cost');
+
+  console.log(`\n  priority-pillar coverage: ${onPriority.length} resolved hypothes${onPriority.length === 1 ? 'is' : 'es'} targeted "${priority}"` +
+    (tally ? ` (${tally})` : '') + `; ${points.length} regression point(s) recorded.`);
+
+  // No recorded trajectory is the more dangerous of the two failures: without points there is
+  // no series to plot, so "has this pillar ever actually improved?" has no answer anywhere and
+  // the question stops being asked. consultant reached run-007 with an empty regressions/ dir.
+  if (points.length === 0) {
+    console.log('  NO REGRESSION POINTS RECORDED. Nothing in this experiment tracks whether the priority');
+    console.log('  pillar has moved across runs, so a programme can miss its own target indefinitely');
+    console.log('  without anything saying so. /optimizer:analyze should be recording one per run.');
+  }
+
+  if (onPriority.length >= 2 && wins.length === 0) {
+    console.log(`  NEVER CONFIRMED: not one of those ${onPriority.length} moved "${priority}" in the predicted direction.`);
+    console.log('  Before planning another, ask what this pillar\'s cost function actually IS and whether');
+    console.log('  every attempt so far has attacked the same wrong term. Repeating the category of the');
+    console.log('  last N failures is a habit, not an experiment.');
+  }
+}
+
 function parseArgs(argv) {
   const cmd = argv[2];
   const testenvRoot = argv[3];
@@ -138,6 +182,7 @@ const COMMANDS = {
     }
     console.log('\n  score = predicted_magnitude_pct x confidence / est_cost. Hypotheses that cannot move');
     console.log('  the priority pillar rank below ones that can, whatever their score.');
+    printPriorityCoverage(root, objective);
   },
 
   classify(root, o) {
@@ -163,13 +208,16 @@ const COMMANDS = {
 
   regression(root, o) {
     if (!o.run || !o.arms) fail('--run and --arms <json> are required');
+    const kind = o.kind || 'frozen';
+    if (!['frozen', 'run'].includes(kind)) fail(`--kind must be "frozen" or "run", got "${kind}"`);
     const doc = recordRegressionPoint(root, {
       run: o.run,
       arms: parseJsonOpt(o.arms, 'arms'),
       rubric_version: o['rubric-version'] || null,
+      kind,
     });
-    console.log(`[optimizer:lab] regression point recorded for ${o.run} (${doc.points.length} point(s) total)`);
-    const series = regressionSeries(root);
+    console.log(`[optimizer:lab] ${kind} point recorded for ${o.run} (${doc.points.length} point(s) total)`);
+    const series = regressionSeries(root, { kind: 'frozen' });
     if (series.length > 1) {
       console.log(`  NOTE: ${series.length} separate series — the rubric version changed, so these are NOT one curve.`);
     }

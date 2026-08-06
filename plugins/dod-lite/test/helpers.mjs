@@ -95,10 +95,16 @@ export function stubMissingClaude() {
   };
 }
 
-/** A stub that emits a well-formed v2 verdict. */
-export function verdictStub({ pass = true, reason = 'ok', evidence = [{ path: 'a.txt', quote: 'x' }], confidence = 'high' } = {}) {
+/**
+ * A stub that emits a well-formed v2 verdict. Pass `gradeable: false` to emit the
+ * "I could not evaluate this" shape — a grader that was blocked or handed a format it
+ * cannot parse, which must record `error` rather than scoring against the arm.
+ */
+export function verdictStub({ pass = true, reason = 'ok', evidence = [{ path: 'a.txt', quote: 'x' }], confidence = 'high', gradeable } = {}) {
+  const verdict = { pass, reason, evidence, confidence };
+  if (gradeable !== undefined) verdict.gradeable = gradeable;
   return `
-const out = { structured_output: ${JSON.stringify({ pass, reason, evidence, confidence })} };
+const out = { structured_output: ${JSON.stringify(verdict)} };
 console.log(JSON.stringify(out));
 process.exit(0);
 `;

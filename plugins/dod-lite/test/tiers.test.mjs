@@ -79,6 +79,40 @@ test('prompt tier: a pass citing nothing is recorded as ungrounded', async () =>
   } finally { restore(); }
 });
 
+test('prompt tier: a grader that could not read the artifact records error, never fail', async () => {
+  // consultant run-007: `movement-explained` returned "blocked by permission requirements"
+  // / "cannot parse the required binary Office files" on BOTH arms and was scored as a real
+  // DoD failure, then flipped pass -> fail between turns with no change to the deck. An
+  // instrument that cannot open the artifact is not evidence about the artifact.
+  const cwd = makeWorkspace();
+  const restore = stubClaude(verdictStub({
+    pass: false,
+    gradeable: false,
+    reason: 'cannot parse the required binary Office files',
+    evidence: [],
+  }));
+  try {
+    writeCheck(cwd, 'unreadable.md', '---\ntype: prompt\n---\nDoes the deck explain movement?');
+    const defs = await loadCheckDefs(cwd, ['unreadable']);
+    const r = await runPromptCheck(cwd, 'unreadable', defs.unreadable, null, 30_000, 60_000);
+    assert.equal(r.result, 'error', 'an ungradeable check must never land in the scoreline as a fail');
+    assert.match(r.output, /could not evaluate/);
+    assert.match(r.output, /binary Office files/, 'the barrier is reported, not swallowed');
+  } finally { restore(); }
+});
+
+test('prompt tier: a verdict without `gradeable` is still graded normally', async () => {
+  // Checks authored before the field existed must keep working unchanged.
+  const cwd = makeWorkspace();
+  const restore = stubClaude(verdictStub({ pass: false, reason: 'genuinely missing' }));
+  try {
+    writeCheck(cwd, 'legacy.md', '---\ntype: prompt\n---\nq');
+    const defs = await loadCheckDefs(cwd, ['legacy']);
+    const r = await runPromptCheck(cwd, 'legacy', defs.legacy, null, 30_000, 60_000);
+    assert.equal(r.result, 'fail');
+  } finally { restore(); }
+});
+
 test('prompt tier: bare "haiku" is rejected before any subprocess is spawned', async () => {
   const cwd = makeWorkspace();
   // No stub on PATH at all: if the model were not validated first, this would try to

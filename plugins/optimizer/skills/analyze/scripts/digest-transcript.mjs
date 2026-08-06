@@ -104,9 +104,9 @@ export function digestFile(filePath, arm) {
     jsonl_lines: lines.length,
     malformed: 0,
     counts: {
-      user_real: 0, assistant_text: 0, thinking_blocks: 0, tool_calls: 0,
+      user_real: 0, user_system_reentry: 0, assistant_text: 0, thinking_blocks: 0, tool_calls: 0,
       tool_results: 0, tool_errors: 0, permission_rejections: 0,
-      attachments: 0, snapshots: 0, compact_boundaries: 0,
+      attachments: 0, snapshots: 0, compact_boundaries: 0, sidechain_lines: 0,
     },
     attribution: { skills: {}, plugins: {} },
     errors: [],
@@ -186,11 +186,21 @@ export function digestFile(filePath, arm) {
           continue;
         }
       }
-      if (e.isCompactSummary || e.isSidechain) continue;
+      if (e.isSidechain) { d.counts.sidechain_lines++; continue; }
+      if (e.isCompactSummary) continue;
       const text = typeof content === 'string'
         ? content
         : (Array.isArray(content) ? content : []).filter((b) => b?.type === 'text').map((b) => b.text || '').join('\n');
       if (!text.trim()) continue;
+      // A backgrounded Agent re-enters the session as a plain `type: "user"` entry when it
+      // finishes. Not operator input — see analyze-jsonl.mjs for the full account of the
+      // four numbers this corrupted.
+      if (e.origin?.kind === 'task-notification' || e.promptSource === 'system'
+          || /^\s*<task-notification>/.test(text)) {
+        d.counts.user_system_reentry++;
+        d.timeline.push({ n, at, kind: 'AGENT', text: squash(text, CAP_ASSISTANT) });
+        continue;
+      }
       // isMeta covers system-injected pseudo-user lines (hook context, reminders); they are
       // NOT operator input and must never be counted as arm asymmetry.
       const kind = e.isMeta ? 'META' : 'USER';
@@ -211,7 +221,16 @@ export function digestFile(filePath, arm) {
       'STOP: re-select this arm\'s session from manifest.json and say the run is unanalyzable as-linked.',
     );
   }
-  if (d.jsonl_lines <= STUB_LINES && d.counts.user_real <= STUB_USER_TURNS) {
+  // A subagent session has no operator turns BY CONSTRUCTION — its opening prompt is a
+  // sidechain entry written by the parent, not a human. Running the stub heuristic over
+  // one flags "0 real user turns" on every single background-Agent digest, which is
+  // definitional rather than diagnostic. Logged as run-006 defect #3 and again in
+  // run-007; the heuristic only means anything for a session that was supposed to have
+  // an operator driving it.
+  const isSubagentSession = d.counts.sidechain_lines > 0 && d.counts.user_real === 0;
+  if (isSubagentSession) {
+    d.subagent_session = true;
+  } else if (d.jsonl_lines <= STUB_LINES && d.counts.user_real <= STUB_USER_TURNS) {
     d.warnings.push(
       `STUB TRANSCRIPT: ${d.jsonl_lines} JSONL lines and ${d.counts.user_real} real user turn(s). ` +
       'This is very likely an abandoned start or a restart stub, NOT this arm\'s working session. ' +

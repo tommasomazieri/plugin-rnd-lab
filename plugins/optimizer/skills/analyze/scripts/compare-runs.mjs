@@ -580,6 +580,10 @@ function summarize(m) {
     blocked_continuations: m.turn_counter?.blocked_continuations ?? null,
     assistant_messages: m.turns.assistant_messages,
     user_real_turns: m.turns.user_real,
+    // Background-Agent completions that re-entered the session as `type: "user"`.
+    // Reported rather than dropped: a large asymmetry here is the delegation signal
+    // itself, and it used to be silently miscounted as operator intervention.
+    user_system_reentries: m.turns.user_system_reentry ?? 0,
     tool_calls_total: m.tool_calls_total,
     tool_errors: m.tool_errors,
     compaction_events: m.compactions,

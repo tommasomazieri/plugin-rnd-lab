@@ -66,11 +66,33 @@ Changing the priority later is expected and cheap — the old one is retired int
 not erased, and that sequence of shifts is the spine of the eventual write-up. What is
 *not* cheap is never declaring one.
 
-**Then pick the top-ranked open hypothesis** (`score = predicted_magnitude × confidence ÷
+**Then take the top-ranked open hypothesis** (`score = predicted_magnitude × confidence ÷
 cost`, with hypotheses that cannot move the priority pillar ranked below ones that can).
-Confirm it with the user, or let them override — the ranking is an argument, not an
-instruction. If there are no open hypotheses, say so plainly and interview for one before
-going further:
+
+**Picking anything other than rank 1 requires a written reason, recorded in the run folder.**
+The ranking is still an argument rather than an instruction — but an argument you can ignore
+silently is not an argument, it is decoration. Observed failure: run-005 through run-007 each
+fired a fresh, lower-ranked hypothesis while H-006 (score 12.00) and H-005 (9.75) sat open and
+on-priority the whole time. The mechanism is structural, not carelessness — every `analyze`
+cycle banks new hypotheses from the run just examined, so the freshest idea always arrives with
+the most vivid evidence attached, and the top of the ledger ages out of attention while never
+being rejected.
+
+So, when the pick is not rank 1:
+
+1. Say the delta out loud: *"taking H-014 (3.33) over H-006 (12.00)."*
+2. Write the reason into `runs/run-NNN/hypothesis.md` under `## Why not the top rank`. One or
+   two sentences. "It's fresher" is not a reason. "H-006 needs a fixture we don't have yet" is.
+3. If the top-ranked hypothesis has now been skipped **twice or more**, stop and put it to the
+   user directly: fire it, or resolve it as `withdrawn` with a reason. It does not get to keep
+   sitting at the top being skipped — that is how the highest-value work becomes permanently
+   invisible.
+
+If the ranking formula is the thing that is wrong — if freshness genuinely should weigh — change
+the formula deliberately and say so in the record. What is not acceptable is the formula saying
+one thing and the runs doing another, silently, indefinitely.
+
+If there are no open hypotheses, say so plainly and interview for one before going further:
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" add "<testenvRoot>" \
@@ -81,6 +103,25 @@ node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" add "<testenvRoot>" \
 Carry the chosen hypothesis id forward: `task.md` must exercise it, and the DoD checks must
 be able to tell whether it held. Note it in the run folder so `/optimizer:analyze` can
 resolve the right one.
+
+**If the hypothesis is about context, caching, or session re-entry, the instrument is inside
+the experiment.** dod-lite's Stop hook runs every check including any `claude -p` graders, and
+it occupies real wall-time in exactly the gaps where a resumed session rebuilds its context
+prefix. run-007: the Stop hook took ~3.5 minutes per turn across 12 checks with two prompt-tier
+graders, and its timestamps (12:31:57, 12:42:55, 12:51:43) land squarely between the test arm's
+cache-creation spikes (12:28:16, 12:34:32, 12:39:02, 12:45:55) — the four turns bracketing two
+background dispatches accounted for $8.92, 54% of that run's entire cost gap.
+
+That run **cannot** separate "background dispatch forces a re-cache" from "the Stop hook's
+duration forces a re-cache", because control had one Stop and never resumed after it. Not
+established as causal in either direction, and a run that varies only the artifact will not
+establish it either — it will confirm whichever story you walked in with.
+
+So when planning such a run, **vary the Stop-hook cost deliberately too**: same checks on both
+arms as always, but either drop the prompt-tier graders to script-tier for the run, or plan a
+second pairing that changes only the hook cost. Say in `hypothesis.md` which confound the design
+separates and which it does not. A cost hypothesis that leaves this uncontrolled produces a
+number that is not about the plugin.
 
 **Autonomy is measured, so don't accidentally design it away.** Every `AskUserQuestion` the
 arm makes counts against the autonomy pillar. Nothing in the harness forces one any more —

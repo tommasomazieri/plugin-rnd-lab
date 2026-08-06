@@ -187,6 +187,46 @@ bump are on different scales and are never plotted as one curve. That is fine an
 as understanding improves — but say so when you do it, because it costs comparability with
 everything measured before.
 
+### 3b-ii. If a rubric already exists — amend it, do not silently rewrite it
+
+A rubric authored once and never revisited is a snapshot, and the experiment moves underneath
+it. consultant is the worked example: runs 002/003/004 were three re-skins of one archetype,
+005 changed the archetype outright, 006 stepped the difficulty tier, 007 changed archetype
+again. A v1 written before run-001 would have been describing a different deliverable by 005.
+`/optimizer:analyze` records `rubric_version` per score and `/optimizer:paper` reports where
+the trajectory forks — so the pipeline has a reader and a versioning convention, and until now
+had **no writer**. Nothing ever bumped the version.
+
+When `quality-rubric.md` is already present at the target path:
+
+1. **Show it to the user in full** and ask the one question that matters: *does this still
+   describe what a good outcome looks like, given what the last few runs actually produced?*
+2. Then classify what they want, and say which you are doing:
+   - **No change** — the rubric still fits. Say so and move on. This is a legitimate and
+     common answer; do not manufacture edits to look busy.
+   - **Clarification** — the dimensions and weights are right, but an anchor was ambiguous
+     and two graders could have disagreed. Edit the wording in place and **keep the version**.
+     Scores stay comparable because the scale did not move.
+   - **Scale change** — a dimension added or removed, a weight changed, or an anchor moved to
+     a different level. **Bump `rubric_version`** (`v1` → `v2`) and rewrite the file.
+3. On a bump, write a `## Changelog` section at the bottom of the rubric — one entry per
+   version, naming what changed, why, and the run after which it changed:
+
+   ```markdown
+   ## Changelog
+   - **v2** (after run-007) — split "structure" into "structure" and "narrative flow";
+     the status-pack archetype made them independently bad in a way v1 scored as one number.
+   ```
+4. Tell the user, plainly, what the bump costs: *"quality scores from run-001 to run-007 are
+   on v1 and scores from run-008 on are on v2; they are two curves, and `/optimizer:paper`
+   will show the fork rather than a single line."* A bump is the right call often enough — it
+   just must never be an accident.
+
+**Never bump the version for a wording fix, and never edit anchors in place for a scale
+change.** The first throws away comparability that was still valid; the second silently
+invalidates every past score while the version number claims they are comparable, which is
+strictly worse than having no rubric at all — a wrong rubric gets plotted anyway.
+
 ## 4. Confirm
 
 Tell the user: `mandate.md + quality-rubric.md written (<mandate-id>).` If this was mid-init,

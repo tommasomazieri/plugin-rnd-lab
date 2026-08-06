@@ -346,7 +346,13 @@ test('the DoD engine and its deny rule are still injected into both arms', () =>
 
   for (const arm of ['control', 'test']) {
     const settings = readJson(path.join(runDir, arm, '.claude', 'settings.json'));
-    assert.deepEqual(settings.permissions.deny, ['Edit(/.dod/**)', 'Write(/.dod/**)', 'MultiEdit(/.dod/**)']);
+    // `.dod/` is opaque in BOTH directions: the arm may not edit the checkers it is
+    // graded against, and may not read the shared sessions/ folder that holds the
+    // other arm's scorecard.
+    assert.deepEqual(settings.permissions.deny, [
+      'Edit(/.dod/**)', 'Write(/.dod/**)', 'MultiEdit(/.dod/**)',
+      'Read(/.dod/**)',
+    ]);
     assert.ok(fs.existsSync(path.join(runDir, arm, 'TASK.md')));
     assert.ok(fs.existsSync(path.join(runDir, arm, '.dod')), 'the shared .dod junction is linked');
   }

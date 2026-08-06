@@ -36,7 +36,7 @@ export function analyzeFile(filePath) {
     parsed_lines: 0,
     malformed_lines: 0,
     models: {},
-    turns: { user_real: 0, user_tool_results: 0, user_meta: 0, assistant_messages: 0, sidechain_lines: 0 },
+    turns: { user_real: 0, user_system_reentry: 0, user_tool_results: 0, user_meta: 0, assistant_messages: 0, sidechain_lines: 0 },
     tokens: { input: 0, output: 0, cache_read: 0, cache_creation: 0 },
     tokens_by_model: {},
     cost_usd_reported: 0,
@@ -152,6 +152,26 @@ export function analyzeFile(filePath) {
               .filter((b) => b?.type === 'text')
               .map((b) => b.text || '')
               .join('\n');
+      // Claude Code re-enters the session as a `type: "user"` entry when a backgrounded
+      // Agent finishes. Structurally it is indistinguishable from a typed prompt — not
+      // meta, not a tool_result, not a sidechain, plain string content — so it used to
+      // land in user_real and corrupt FOUR numbers from one root cause: turns.user_real,
+      // user_bias.user_chars_total, autonomy.hitl_elective and the prompt-parity verdict
+      // (all of compare-runs.mjs' bias indicators read this block).
+      //
+      // It is not a symmetric error. Only an arm that DELEGATES gets these entries, and
+      // in an A/B run the delegating arm is essentially always the test arm — so the
+      // instrument was penalising exactly the behaviour under test. Measured on
+      // consultant run-007: test scored 3 user turns and 21,427 user chars against a
+      // real 1 turn / 113 chars, and prompt-parity called an identical pair DIVERGENT.
+      //
+      // Excluded on any of three independent signals, because transcripts predating
+      // these fields still carry the tag in their text:
+      const kind = e.origin?.kind;
+      if (kind === 'task-notification' || e.promptSource === 'system' || /^\s*<task-notification>/.test(text)) {
+        m.turns.user_system_reentry++;
+        continue;
+      }
       m.turns.user_real++;
       m.user_bias.real_user_turns++;
       m.user_bias.user_chars_total += text.length;

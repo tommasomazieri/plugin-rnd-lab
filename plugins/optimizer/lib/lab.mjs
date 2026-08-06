@@ -277,20 +277,37 @@ export function readRegressions(testenvRoot) {
  * either side of a bump are not on the same scale, and plotting them as one line would
  * invent a trend. Consumers must group by it rather than assume continuity.
  */
-export function recordRegressionPoint(testenvRoot, { run, at = new Date().toISOString(), rubric_version = null, arms }) {
+/**
+ * `kind` separates the two things a point can be:
+ *   'frozen'  — the frozen regression task, run again. Comparable to other 'frozen' points
+ *               and the only sequence that is a true like-for-like curve.
+ *   'run'     — an ordinary run, whose task differs from every other run's.
+ *
+ * Both are recorded. Only recording 'frozen' points is why consultant reached run-007 with
+ * an empty regressions/ dir and no way to answer "has the priority pillar ever moved?" — a
+ * programme can miss its own target eight times running if nothing accumulates per-run
+ * numbers. Ordinary points are not a curve and must never be plotted as one; they are the
+ * per-run record that makes the question answerable at all.
+ */
+export function recordRegressionPoint(testenvRoot, { run, at = new Date().toISOString(), rubric_version = null, kind = 'frozen', arms }) {
   const doc = readRegressions(testenvRoot);
   doc.points = doc.points.filter((p) => p.run !== run); // re-analysing a run replaces its point
-  doc.points.push({ run, at, rubric_version, arms });
+  doc.points.push({ run, at, rubric_version, kind, arms });
   doc.points.sort((a, b) => String(a.run).localeCompare(String(b.run)));
   writeJson(regressionsPath(testenvRoot), doc);
   return doc;
 }
 
-/** Regression points grouped into contiguous same-rubric series. Each series is plottable; across series is not. */
-export function regressionSeries(testenvRoot) {
+/**
+ * Regression points grouped into contiguous same-rubric series. Each series is plottable;
+ * across series is not. Pass `{ kind: 'frozen' }` for the true like-for-like curve — mixing
+ * ordinary runs into it compares different tasks and means nothing.
+ */
+export function regressionSeries(testenvRoot, { kind = null } = {}) {
   const { points } = readRegressions(testenvRoot);
+  const selected = kind ? points.filter((p) => (p.kind ?? 'frozen') === kind) : points;
   const series = [];
-  for (const p of points) {
+  for (const p of selected) {
     const last = series[series.length - 1];
     if (last && last.rubric_version === p.rubric_version) last.points.push(p);
     else series.push({ rubric_version: p.rubric_version, points: [p] });

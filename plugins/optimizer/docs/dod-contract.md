@@ -293,12 +293,23 @@ could not reach is recorded `error` rather than silently left `pending`.
 
 ### Verdict contract v2 — a grader that cites nothing did not look
 
-A prompt checker returns JSON matching `VERDICT_SCHEMA`: `pass` (bool), `reason` (string),
-`evidence` (array of `{path, line?, quote}`), `confidence` (`high`|`low`) — all four required.
-`resources/prompt-checker-system.md` requires the citations. A `pass` with an empty `evidence`
-array is recorded as-is and **flagged ungrounded** by both `probe-checks.mjs` and
-`/optimizer:analyze`; it is never silently accepted, because an uncited pass and a real pass are
-indistinguishable in the session file otherwise.
+A prompt checker returns JSON matching `VERDICT_SCHEMA`: `pass` (bool), `gradeable` (bool),
+`reason` (string), `evidence` (array of `{path, line?, quote}`), `confidence` (`high`|`low`) —
+all five required. `resources/prompt-checker-system.md` requires the citations. A `pass` with an
+empty `evidence` array is recorded as-is and **flagged ungrounded** by both `probe-checks.mjs`
+and `/optimizer:analyze`; it is never silently accepted, because an uncited pass and a real pass
+are indistinguishable in the session file otherwise.
+
+**`gradeable: false` records `error`, not `fail`.** "I could not evaluate this" is a third
+outcome and belongs with the infrastructure failures, not with verdicts about the artifact.
+Without it a grader that is blocked, or handed a binary format it cannot parse, has only
+`pass: false` available — and an instrument failure lands in the scoreline as a quality result.
+Confirmed on consultant run-007: `movement-explained` returned *"blocked by permission
+requirements"* / *"cannot parse the required binary Office files"* on both arms, was recorded as
+a real DoD failure, and flipped `pass` → `fail` between turns 2 and 3 with no change to the
+deck — movement that is only possible when the verdict is about the grader's access rather than
+about the artifact. A missing `gradeable` field is treated as gradeable, so checks written
+before this contract keep working unchanged.
 
 `model` is validated before the subprocess spawns: a documented CLI alias (`fable`, `opus`,
 `sonnet`) or a full `claude-*` id. Anything else errors loudly at gate time rather than

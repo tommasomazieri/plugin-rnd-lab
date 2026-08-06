@@ -394,17 +394,36 @@ function writeWorkspaceSettings(workspace, manifestPath, arm, dodDir) {
         },
       ],
     },
-    // Structural, not advisory: an arm must never be able to edit the shared DoD
-    // checkers it's graded against, no matter what it decides mid-run (confirmed
-    // real incident: blender-plugin-tester run-003, test arm edited
+    // Structural, not advisory: `.dod/` is opaque to the arm in BOTH directions.
+    //
+    // WRITE — an arm must never be able to edit the shared DoD checkers it is graded
+    // against, no matter what it decides mid-run (confirmed real incident:
+    // blender-plugin-tester run-003, test arm edited
     // .dod/checks/_lib/scene_state_checks.py three times after getting stuck on a
-    // failing check, reverting only after two live human interventions). `/.dod/**`
-    // is project-settings-relative (this file lives at <workspace>/.claude/settings.json),
-    // so it resolves to <workspace>/.dod/** on both arms regardless of experiment.
-    // Also feeds sandbox.filesystem.denyWrite automatically (Claude Code merges
-    // Edit(...)/Write(...) deny rules into it), closing the Bash-write-around-the-tool gap too.
+    // failing check, reverting only after two live human interventions).
+    //
+    // READ — `linkDodFolder` junctions BOTH arms' `.dod` to the same
+    // <testenvRoot>/.dod, so `.dod/sessions/` holds every session's scorecard and
+    // either arm could read the other's. In an A/B harness the arms must not be able
+    // to see each other's answers, and an arm reading even its OWN scorecard turns a
+    // silent auditor into a feedback channel — which is exactly what dod-lite's
+    // stdout silence exists to prevent (see docs/dod-contract.md). Nothing in an
+    // arm's real work ever needs to open this folder.
+    //
+    // `/.dod/**` is project-settings-relative (this file lives at
+    // <workspace>/.claude/settings.json), so it resolves to <workspace>/.dod/** on
+    // both arms regardless of experiment. Read/Edit deny rules are merged into the
+    // sandbox filesystem boundary automatically, which closes the
+    // Bash-around-the-tool gap (`cat`/`head`/`tail`/`sed`) for both directions.
+    // Residual, accepted: an arbitrary subprocess (`node -e`, a python one-liner)
+    // is outside what permission rules can reach. dod-lite's own hooks are
+    // unaffected — they run as subprocesses with direct fs access, not through the
+    // arm's tool permissions, so the auditor keeps working normally.
     permissions: {
-      deny: ['Edit(/.dod/**)', 'Write(/.dod/**)', 'MultiEdit(/.dod/**)'],
+      deny: [
+        'Edit(/.dod/**)', 'Write(/.dod/**)', 'MultiEdit(/.dod/**)',
+        'Read(/.dod/**)',
+      ],
     },
   };
   const dir = path.join(workspace, '.claude');

@@ -138,6 +138,15 @@ export const VERDICT_SCHEMA = {
   type: 'object',
   properties: {
     pass: { type: 'boolean' },
+    // "I could not evaluate this" is a THIRD outcome, not a failure. Without it a grader
+    // that cannot open the artifact has only `pass: false` available, and an instrument
+    // failure lands in the scoreline as a quality result. Confirmed on consultant
+    // run-007: `movement-explained` returned "blocked by permission requirements" /
+    // "cannot parse the required binary Office files" on BOTH arms and was recorded as a
+    // real DoD failure — then flipped pass -> fail between turns 2 and 3 with no change
+    // to the deck, which is only possible when the verdict is about the grader's access
+    // rather than about the artifact.
+    gradeable: { type: 'boolean' },
     reason: { type: 'string' },
     evidence: {
       type: 'array',
@@ -153,7 +162,7 @@ export const VERDICT_SCHEMA = {
     },
     confidence: { type: 'string', enum: ['high', 'low'] },
   },
-  required: ['pass', 'reason', 'evidence', 'confidence'],
+  required: ['pass', 'gradeable', 'reason', 'evidence', 'confidence'],
 };
 
 function systemPromptFile() {
@@ -360,6 +369,8 @@ async function attemptPromptCheck(cwd, id, def, systemPrompt, timeoutMs) {
     def.body,
     '',
     `Investigate the repository at ${cwd} as needed (read-only tool access under plan mode) to determine whether this check currently passes. Verify — don't assume. Return your verdict via the required structured output, and cite the specific files and lines you actually read in \`evidence\`.`,
+    '',
+    'Set `gradeable: false` if you could not actually evaluate the check — the file you needed is missing, is a binary format you cannot parse, or a tool call was blocked. That is NOT a failing verdict: report it as ungradeable and say which file and which barrier in `reason`. Only set `pass: false` when you read the artifact and it genuinely does not meet the criterion.',
   ].join('\n');
 
   const args = [
@@ -398,6 +409,18 @@ async function attemptPromptCheck(cwd, id, def, systemPrompt, timeoutMs) {
   const verdict = parsed.structured_output;
   if (!verdict || typeof verdict.pass !== 'boolean') {
     return { id, tier: 'prompt', result: 'error', output: 'checker returned no structured verdict — nothing was graded.' };
+  }
+  // `gradeable: false` is an instrument failure, not a verdict about the artifact — it
+  // routes to `error` alongside spawn/timeout/parse failures, so a grader that cannot
+  // open what it was asked to grade never scores against the arm. Absent field is treated
+  // as gradeable, keeping checks written before this contract working unchanged.
+  if (verdict.gradeable === false) {
+    return {
+      id,
+      tier: 'prompt',
+      result: 'error',
+      output: `checker could not evaluate this check: ${verdict.reason || '(no reason given)'}`,
+    };
   }
   const evidence = Array.isArray(verdict.evidence) ? verdict.evidence : [];
   return {
