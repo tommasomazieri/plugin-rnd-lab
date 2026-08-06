@@ -13,9 +13,19 @@ argument-hint: ""
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" detect "<cwd>"
 ```
 
-Read `problem-model.md`, the ranked hypotheses, and `framings.md` first. Confirm with the user
-**which hypothesis this MVP exists to test** before writing a line of it. An MVP that tests
-nothing in particular produces feedback nobody can act on.
+Read `problem-model.md`, the ranked hypotheses, and `framings.md` first.
+
+**The hypothesis is not the spec. The job is the spec.** Confirm two separate things with the
+user before writing a line: what work vN does *for them*, and which hypothesis you will be
+watching while they do that work. The job sets the scope; the hypothesis sets what you instrument
+inside it. Build the hypothesis alone and you ship a probe — an artifact aimed at your question
+instead of at their work.
+
+`/prospector:frame` §5 ranks by expected learning, which puts the hypothesis you know LEAST about
+at the top. Correct for choosing what to find out; wrong as a build order, because maximum
+uncertainty is usually maximum distance from anything the user would run daily. Take the
+top-ranked hypothesis **that a job-doing vN can carry**, and record in `package.md` why you
+passed over any above it.
 
 ## 1. Design the package
 
@@ -34,16 +44,46 @@ The package is the readable artifact the user reacts to. Write `packages/vN/pack
 8. **Recommended next experiment** — the smallest step that reduces the biggest uncertainty.
 9. **Handoff readiness** — one of: more discovery · validation · concept design ·
    implementation · ready for the Optimizer.
-10. **MVP plugin** — what vN actually does, and the single hypothesis it exists to test.
+10. **MVP plugin** — what vN actually does, the single hypothesis it is instrumented for, and
+    **coverage**: which of the needs in (3) vN addresses, and which it deliberately does not.
+    Every need in (3) appears in one list or the other, no exceptions. This is the section that
+    answers *"we talked for two hours — where did it all go?"*. A need named as uncovered is a
+    decision the user can argue with; a need left off the page is a leak they can only notice
+    by its absence, days later, while trying to use the thing.
 
-## 2. Build the MVP — deliberately narrow
+## 2. Build the MVP — narrow in SCOPE, never in USEFULNESS
 
 It goes at the **repo root**, not inside `.prospector/`: `.claude-plugin/plugin.json`, `skills/`,
 and whatever else it needs. `.prospector/` is the engagement's record; the root is the product.
 
-Narrow is the whole point. An MVP that covers the full imagined product tests the framing and
-five other things at once, and when the user dislikes it you will not know which part failed.
-Build the thinnest thing that can produce a real signal about the chosen hypothesis.
+Two constraints. Miss either and vN is wrong.
+
+**Floor — it must do the user's job.** Not describe the job, not interview them about the job,
+not emit a document *about* the job. Do the job, badly. They came to `/prospector:start` because
+work they care about comes out wrong; vN has to be a thing they can point at that work and run.
+
+**Ceiling — only enough of the job to expose the chosen hypothesis.** An MVP covering the full
+imagined product tests the framing and five other things at once, and when they dislike it you
+will not know which part failed.
+
+**"Thinnest thing that produces a signal" is not the rule**, and taking it as the rule has a
+degenerate optimum — the thinnest thing that produces a signal is a *question*, and a question
+shipped as a plugin is not an MVP. The rule is **the thinnest thing that does the job**.
+
+### The floor test — all four, before writing a line
+
+1. **Can they run it repeatedly, on different real work?** A thing that is run once and answered
+   has no second day. No → it is a probe.
+2. **If they quietly stopped using it on day two, would that show?** `/prospector:review` §1
+   calls abandonment the strongest signal the engagement gets. An artifact that cannot be
+   abandoned cannot produce one.
+3. **Does it output the thing they came for, or a description of that thing?** A document about
+   the work is the interview wearing a trenchcoat.
+4. **Afterwards, do they still do the whole job by hand?** Then vN bought nothing, and the
+   annoyance you measure in review is the annoyance of using vN — not of the original problem.
+
+Any "no" means you designed a probe. **Ask that question in this session instead** — it is free
+and it is now — and build vN against a hypothesis a working artifact can carry.
 
 **Set `plugin.json`'s version to `N.0.0` matching package vN.** Package vN and MVP vN are one
 event and one number, so "which version were you using?" always has an answer.

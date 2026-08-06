@@ -107,6 +107,30 @@ test('resolved hypotheses leave the ranking but keep their outcome', async () =>
   assert.equal(rankHypotheses(doc).length, 0);
 });
 
+test('not-testable keeps the hypothesis OPEN and at its old rank', async () => {
+  const d = await fresh();
+  const h = await addHypothesis(d, { statement: 'coin flip', confidence: 0.5 });
+  await addHypothesis(d, { statement: 'near certain', confidence: 0.95 });
+
+  // vN could not be used on real work at all, so nothing was learned about H-001. Retiring it
+  // here would let a build defect silently delete the least-understood question in the file.
+  const resolved = await resolveHypothesis(d, h.id, 'not-testable', 'v1 was a one-shot interview');
+  assert.equal(resolved.status, 'open');
+  assert.equal(resolved.outcome, 'not-testable');
+
+  const ranked = rankHypotheses(await readHypotheses(d));
+  assert.equal(ranked.length, 2, 'an untested hypothesis stays in the ranking');
+  assert.equal(ranked[0].statement, 'coin flip', 'and keeps the rank it had before the failed build');
+});
+
+test('every other outcome still retires the hypothesis', async () => {
+  for (const outcome of ['confirmed', 'partly-confirmed', 'refuted', 'inconclusive']) {
+    const dir = await fresh();
+    const h = await addHypothesis(dir, { statement: outcome, confidence: 0.5 });
+    assert.equal((await resolveHypothesis(dir, h.id, outcome)).status, 'resolved', outcome);
+  }
+});
+
 test('an unknown outcome is rejected rather than recorded', async () => {
   const d = await fresh();
   const h = await addHypothesis(d, { statement: 'x' });

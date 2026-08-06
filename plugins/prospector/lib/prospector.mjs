@@ -22,7 +22,13 @@ export const STAGES = ['intake', 'inquiry', 'needs', 'framing', 'hypotheses', 'p
 export const STATUSES = ['confirmed', 'strongly-supported', 'tentative', 'assumption', 'unknown', 'contradicted'];
 
 export const HYPOTHESIS_STATUSES = ['open', 'testing', 'resolved'];
-export const OUTCOMES = ['confirmed', 'partly-confirmed', 'refuted', 'inconclusive'];
+
+// `not-testable` is about the MVP, not the user. It means vN could not carry the test at all —
+// it was not usable enough on real work to produce evidence in either direction. Without it the
+// only home for that case is `inconclusive`, which reads as "they did not use it enough" and
+// puts a build defect on the user's tab. Same split dod-lite makes between a failing artifact
+// and a grader that could not open it.
+export const OUTCOMES = ['confirmed', 'partly-confirmed', 'refuted', 'inconclusive', 'not-testable'];
 
 /** Walks up for `.prospector/state.json`, the same way git resolves `.git`. */
 export function findRoot(startDir) {
@@ -137,7 +143,11 @@ export async function resolveHypothesis(root, id, outcome, note) {
   const state = await readState(root);
   const h = doc.hypotheses.find((x) => x.id === id);
   if (!h) throw new Error(`no hypothesis ${id}`);
-  h.status = 'resolved';
+  // A hypothesis nothing could test is still an open question, so it stays OPEN and keeps its
+  // place in the ranking. Retiring it would let a build defect quietly delete the very thing the
+  // engagement least understands — and by rankHypotheses' inverted scoring, that is the one
+  // sitting at the top.
+  h.status = outcome === 'not-testable' ? 'open' : 'resolved';
   h.outcome = outcome;
   h.outcome_note = note ?? null;
   h.resolved_at = new Date().toISOString();

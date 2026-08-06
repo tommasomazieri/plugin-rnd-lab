@@ -109,6 +109,13 @@ find out, not to be right.
 The ranking is an argument, not an instruction. Present the top few with your reasoning and let
 the user override; they hold context you do not.
 
+**It answers "what should we find out next", never "what should we build next."** Inverted
+confidence puts the least-understood hypothesis on top, and the least-understood one is usually
+the furthest from anything the user would run daily. `/prospector:build` scopes vN from the
+user's actual job and uses this ranking only to choose what to watch *inside* that job. A
+hypothesis that nothing job-shaped could test is one you **ask about in session, for free** —
+not one you ship as a plugin.
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" stage "<cwd>" --to hypotheses
 ```
