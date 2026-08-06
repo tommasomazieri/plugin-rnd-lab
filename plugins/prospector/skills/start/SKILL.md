@@ -1,11 +1,13 @@
 ---
 description: >-
-  Begin a Prospector engagement in the current directory: capture the user's stated issue
-  WITHOUT accepting it as the problem, scaffold .prospector/, and run the opening contextual
-  inquiry. Run this FROM the (empty) directory the future plugin will live in — no path
-  argument. Auto-trigger when the user says: "I have a problem with", "I need a tool that",
-  "start a prospector engagement", "help me figure out what to build", "I keep running into",
-  "something's wrong with my workflow", "/prospector:start".
+  Begin a Prospector engagement in the current directory: record what the user walked in with
+  verbatim, separate symptom from diagnosis from prescription, scaffold .prospector/, and run the
+  opening contextual inquiry. The deliverable is always a Claude Code plugin — that is the medium,
+  never a solution to be challenged. Run this FROM the (empty) directory the future plugin will
+  live in — no path argument. Auto-trigger when the user says: "I have a problem with", "I need a
+  tool that", "start a prospector engagement", "help me figure out what to build", "I keep running
+  into", "something's wrong with my workflow", "my X keeps coming out bad", "I don't know why this
+  isn't working", "I want a plugin but I don't know what it should do", "/prospector:start".
 argument-hint: "[the situation, frustration, or idea — in their own words]"
 ---
 
@@ -28,7 +30,7 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" detect "<cwd>"
 
 If the directory is not empty and not a fresh repo, say what is in it and confirm before writing.
 
-## 1. Capture the stated issue — verbatim, and do not believe it
+## 1. Capture what they walked in with — verbatim
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" init "<cwd>" --issue "<their words, verbatim>"
@@ -38,18 +40,65 @@ This `git init`s the directory if needed and creates `.prospector/`. Git is not 
 the record is **tracked**, which is what gives the engagement a real version history, and the
 Optimizer's artifact pinning is built on git, so a non-repo directory could never be handed off.
 
-**The stated issue is an entry point, not the problem definition.** If the user said "I need a
-tool that automatically manages my tasks", you have been told a *solution*, and the problem
-behind it is still unknown. Do not start designing a task manager. Record the sentence exactly
-as spoken so later reframings can be checked against what was actually said.
+Record the sentence exactly as spoken, so later reframings can be checked against what was
+actually said.
 
-Separate, from the very first message, and keep separate:
+### The medium is not up for debate
 
-| stated solution | what they asked to be built |
-| stated issue | what they said is wrong |
-| observed symptoms | what actually happens, concretely |
-| underlying need | what they are trying to achieve |
-| desired outcome | how they would know it was solved |
+**The deliverable is a Claude Code plugin. Always. That is what invoking Prospector means.**
+A user who says "I want a plugin" is not proposing a solution — they are naming the room you are
+both already standing in. What is unknown is *what goes inside it*.
+
+Never treat "a plugin" as a solution to be challenged, never weigh it against a library, a
+script, a service or a change of habit, and never mention that they mentioned it. The open
+question is the plugin's **content**, never its existence.
+
+### Four layers, and only two of them are suspect
+
+An opening message is usually a mix of all four. Separate them silently:
+
+| layer | example | your posture |
+|---|---|---|
+| **medium** | "a plugin" | constant — never questioned, never remarked on |
+| **symptom** | "my games come out bad, in these four ways" | **accept as fact** — they are the sole authority on their own dissatisfaction |
+| **diagnosis** | "because Claude doesn't get game feel" | a hypothesis — this is the thing the engagement exists to test |
+| **prescription** | "so build me a tool that manages my task list" | hold loosest — a solution named before the problem is known |
+
+**A symptom is not a solution, and it is not a problem definition either. It is evidence — and
+it is the best evidence you will ever get.** "My output is bad and I don't know why" is the
+strongest possible opening, not a deficient one: a clean symptom with no diagnosis welded on top
+of it. Say so, and start hunting the cause.
+
+Disbelieve the **explanation**. Never the **complaint**.
+
+### Never say any of this out loud
+
+This is internal posture, not conversation. Do **not** tell the user they have given you a
+solution instead of a problem. Do not explain the taxonomy above. Do not open by correcting how
+they phrased it.
+
+A user who is told their framing is wrong, and handed no legal alternative, has nothing left to
+say — and they came here precisely *because* they cannot name the problem yet. Naming it is the
+job they are hiring this skill to do. If you find yourself about to write "actually, that's a
+solution, not a problem", you have inverted the entire engagement.
+
+Absorb whatever they said, record it verbatim, ask your first question.
+
+### Worked example
+
+> *"I'm trying to make videogames with Claude Code and they keep coming out bad — the pacing is
+> flat, the levels feel samey, the enemies are boring, and the story doesn't land. I want a
+> plugin but I don't know what it should do."*
+
+- **medium**: a plugin → accepted in silence.
+- **symptom**: four of them, concrete and separable → recorded as four evidence entries, believed.
+- **diagnosis**: absent → *good*. Nothing to unpick.
+- **prescription**: absent → *good*.
+
+Correct opening move: pick whichever of the four symptoms is most load-bearing and ask for the
+last concrete instance of it.
+
+Incorrect opening move: any sentence that begins "actually, that's a solution, not an issue."
 
 ## 2. Ask ONE question — the highest-information one available
 

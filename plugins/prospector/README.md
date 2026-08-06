@@ -23,7 +23,7 @@ nothing to cd into — Prospector never runs paired sessions, so it has no execu
 separate. The user installs each MVP and uses it in their own real projects.
 
 ```
-/prospector:start     capture the stated issue without believing it; open the inquiry
+/prospector:start     record what they walked in with, verbatim; open the inquiry
 /prospector:frame     competing framings → adopt one → ranked hypotheses
 /prospector:build     cut package vN + build MVP plugin vN, narrow on purpose
 /prospector:review    turn real use into evidence; resolve or refute
@@ -58,10 +58,18 @@ artifact pinning is built on git as well, so a non-repo directory could never be
 
 ## The rules that make it work
 
-**The stated issue is an entry point, not the problem.** "I need a tool that manages my tasks"
-is a *solution*, and the problem behind it is still unknown. Prospector separates stated
-solution, stated issue, observed symptoms, underlying need, and desired outcome, and never lets
-the first collapse into the last.
+**Four layers arrive together, and only two of them are ever challenged.** The **medium** is a
+Claude Code plugin — always, that is what invoking Prospector means, and it is never treated as
+a proposed solution. The **symptom** ("my games come out bad") is accepted as fact: the user is
+the sole authority on their own dissatisfaction. The **diagnosis** ("because Claude doesn't get
+game feel") is a hypothesis, and testing it is what the engagement is for. The **prescription**
+("so build me a tool that manages my tasks") is held loosest — a solution named before the
+problem is known.
+
+So "my output is bad and I don't know why" is the *strongest* possible opening, not a deficient
+one — a clean symptom with no diagnosis welded on top. Disbelieve the explanation, never the
+complaint, and never say any of this to the user: a person told their framing is wrong, and
+handed no legal alternative, has nothing left to say.
 
 **Behaviour over opinion.** "Tell me about the last time this happened" predicts far better than
 "would you use this?". People report their own context and history well and predict their own
@@ -94,6 +102,11 @@ there is no supported way for one plugin to read another's install directory (`d
 buys co-installation, not code access). Prospector writes plain files where the Optimizer
 already looks, writes no `state.json` or `env.json`, and refuses to overwrite a mandate that a
 live experiment is already anchored to.
+
+## Learning it
+
+`/core:learn prospector` walks the whole loop in plain language, `/core:learn chain` covers the
+handoff to the Optimizer. This file is the internals reference; that one is the walkthrough.
 
 ## Tests
 

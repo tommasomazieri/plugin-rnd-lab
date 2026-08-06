@@ -85,4 +85,4 @@ experiment name to type, optimizer figures out which plugin from cwd.
 Mention once, briefly, as optional (not required — don't dwell on it): the third-party
 `context-mode` MCP plugin (`mksglu/context-mode`) speeds up `/optimizer:analyze`'s transcript
 filtering if installed, but optimizer works fully without it. See README "Optional: faster
-analysis with context-mode" or `/optimizer:learn analyze` for details.
+analysis with context-mode" or `/core:learn analyze` for details.

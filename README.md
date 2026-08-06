@@ -3,7 +3,7 @@
 A Claude Code **marketplace** for plugin R&D tooling — instruments for testing, measuring, and
 iterating on other Claude Code plugins.
 
-Two plugins, operating at different stages:
+Two instruments, operating at different stages (plus `core`, which teaches them — see Install):
 
 | | **Prospector** | **Optimizer** |
 |---|---|---|
@@ -62,10 +62,14 @@ earned its keep, and what to fix before the next iteration.
 
 ```
 claude plugin marketplace add <path-to-this-repo>
+claude plugin install core@plugin-rnd-lab           # start here — teaches both stages
 claude plugin install optimizer@plugin-rnd-lab
 claude plugin install prospector@plugin-rnd-lab     # optional — the discovery stage
 claude plugin install dod-lite@plugin-rnd-lab       # required by optimizer: its arm instrument
 ```
+
+`core` ships one skill, `/core:learn`, and writes nothing — it is the walkthrough for everything
+below. Install it first if you have not used either instrument before.
 
 `dod-lite` must be installed for `/optimizer:fire` to work. An installed plugin cannot reach
 files outside its own directory, so the Optimizer resolves the audit instrument as a cached
@@ -139,9 +143,10 @@ Experiments live OUTSIDE this repo, under your configured `experiments_root\<exp
 runs from your **main** Claude Code session (a third session, separate from the two arms it
 spawns).
 
-New here? **`/optimizer:learn`** walks through this whole lifecycle in plain language — setup,
-planning, firing the paired sessions, working them in parallel, analyzing, and how dod-lite fits
-in. Ask it about one stage specifically too, e.g. `/optimizer:learn fire`.
+New here? **`/core:learn`** walks through both instruments in plain language — Prospector's
+discovery loop, Optimizer's full lifecycle (setup, planning, firing the paired sessions, working
+them in parallel, analyzing), how the two chain, and why dod-lite is separate. Narrow it to one
+plugin or one stage too, e.g. `/core:learn optimizer` or `/core:learn fire`.
 
 0. **`/optimizer:setup`** — first time only (or to change the folder later): pick/create the
    experiments root. Skip if Claude Code already prompted you for it on install.
@@ -167,11 +172,15 @@ in. Ask it about one stage specifically too, e.g. `/optimizer:learn fire`.
 ## Repo layout
 
 ```
-.claude-plugin/marketplace.json   marketplace manifest — one entry: optimizer
-plugins/optimizer/                 the A/B harness — skills, agents, hooks, docs
+.claude-plugin/marketplace.json   marketplace manifest — four entries
+plugins/core/                     the teaching plugin — one skill, /core:learn, writes nothing
+  skills/learn/references/        optimizer.md, prospector.md, chain.md
+plugins/prospector/               the discovery stage — skills, lib, tests
+  README.md                       method + layout reference
+plugins/optimizer/                the A/B harness — skills, agents, hooks, docs
   README.md                       architecture / internals reference (schemas, contracts, scripts)
-plugins/dod-lite/                 optimizer's internal DoD engine — hooks-only, no skill/command,
-                                   not listed in marketplace.json, not for standalone use
+plugins/dod-lite/                 optimizer's arm-side DoD auditor — hooks-only, no skill/command,
+                                   registered so it caches alongside optimizer, not for standalone use
   README.md                       what it does inside an optimizer arm session
 ```
 

@@ -2,7 +2,7 @@
   "name": "prospector",
   "displayName": "Prospector",
   "description": "Discovery-stage counterpart to the Optimizer. Starts from ambiguity rather than a spec: interviews for evidence instead of accepting the stated issue, maintains a living problem model, keeps competing problem framings alive, tracks hypotheses with explicit confidence, and builds deliberately narrow MVP plugins whose real use by the user is the primary evidence. Optimises for effectiveness — solving the right problem — and hands a validated direction to the Optimizer, which then makes its execution efficient.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Tommaso Mazieri"
   },

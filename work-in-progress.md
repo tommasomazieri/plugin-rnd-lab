@@ -10,7 +10,38 @@ Everything above that line is **TODO**.
 
 ---
 
-## 1. TODO — Nobody owns `quality-rubric.md`, so seven runs have no quality number
+## Settled — do not re-open
+
+Answered, written down in the code, and re-raised anyway. Check here before adding anything to
+the open list below.
+
+**dod-lite is a separate plugin, on purpose, permanently.** An arm session must load the auditor
+and **nothing else**. Folding it into optimizer would enable optimizer's own skills — `plan`,
+`fire`, `analyze` — inside the very sessions being measured, which means an arm could design its
+own DoD and the pre-registration guarantee is gone. It is registered in `marketplace.json` only
+so it caches alongside optimizer, since an installed plugin cannot reach files outside its own
+directory. This is not an unresolved boundary, it is not "an engine that ships as a peer plugin"
+awaiting a decision, and it does not belong in any future list of open problems.
+
+Written, verbatim, in two places since before this document existed:
+- `plugins/optimizer/docs/dod-contract.md:37-38`
+- `plugins/optimizer/skills/fire/scripts/launch-pair.mjs:64-70`
+
+Now also stated user-facing in `plugins/core/skills/learn/references/chain.md`. Raised as an
+open problem five times; that is the reason this section exists.
+
+**`quality-rubric.md` has one owner: `/optimizer:understand` §3b.** `/prospector:handoff` writes
+it only at handoff, from a finished discovery engagement, and `understand` §0's IMPORT MODE
+(`understand/SKILL.md:39-53`) explicitly detects that case, shows the imported rubric and skips
+§3b rather than clobbering it. `/optimizer:analyze` is a reader. That is one writer per entry
+path with an explicit reconciliation — not a three-way ownership conflict.
+
+**Teaching lives in `core`.** `/core:learn` covers both instruments and the chain between them.
+`/optimizer:learn` is deleted, not moved.
+
+---
+
+## 1. TODO — `consultant` was never brought up to standard after the split, so seven runs have no quality number
 
 ### The state
 
@@ -26,39 +57,24 @@ either arm did.
 It was logged as harness defect #4 in run-006's report and not fixed before run-007, the last
 run the operator had agreed to fund.
 
-### Three half-owners
+### The actual cause: nobody re-ran `understand` after the split
 
-| claimant | where | what it says |
-|---|---|---|
-| `/optimizer:understand` | `skills/understand/SKILL.md` §3b (line 153) | "Write `quality-rubric.md` — turn 'good' into something scoreable" |
-| `/optimizer:analyze` | `skills/analyze/SKILL.md` line 126 | reads `.ab-bench/mandate-N/quality-rubric.md`, "(written by `/optimizer:understand`)" |
-| `/prospector:handoff` | `plugins/prospector/lib/handoff.mjs` line 90 | "Writes mandate.md (+ quality-rubric.md when a rubric was supplied)" |
+The owner is not in dispute (see **Settled** above). The skill exists, it writes the file, and it
+has a standalone refresh mode built for exactly this. It was simply never invoked after ab-bench
+was split into optimizer + prospector, so `consultant` is still carrying pre-split identity
+files:
 
-A step three skills half-own is a step nobody runs.
+- `consultant/.ab-bench/mandate-1/mandate.md:25` still says **`/ab-bench:plan`** — a command
+  that has not existed since `c79b6f4`. The mandate predates the split outright.
+- `quality-rubric.md` was never written, because §3b only runs when the skill runs.
 
-### Correcting the record on what `understand` is
+`understand`'s standalone path handles this without any code change: it resolves the repo, shows
+the current mandate, asks refresh-in-place vs. new-mandate-version, then re-interviews and
+rewrites both files (`understand/SKILL.md:58-79`, then §2 → §3 → §3b in order).
 
-The operator's recollection is that `understand` was meant as a teaching skill — something a
-user invokes to learn how the plugin works. **That is not what either skill currently is**, and
-the distinction matters for where the rubric should land:
+**Nothing is blocked. The command was just never typed.**
 
-- **`/optimizer:learn`** *is* the teaching skill, but its subject is the harness:
-  *"Teach the user how optimizer works end-to-end: setup, planning an experiment, firing paired
-  sessions… User-invoke only — a walkthrough / reference skill, not a workflow step."*
-- **`/optimizer:understand`** is an **elicitation** skill:
-  *"Interview the user to map out WHAT the plugin under test is actually FOR — its domain, the
-  capability gap it fills… then write mandate.md, the north-star doc that /optimizer:plan
-  cross-checks every task.md and DoD against."*
-
-So there is currently **no** skill that teaches a user about the plugin under test. That is a
-genuine gap and a reasonable thing to want, separate from the rubric question.
-
-`git log -S` shows §3b was **not** in `understand` originally. It arrived in
-`0791c11 feat(ab-bench): multi-artifact pinning, a falsifiability gate, five pillars` — bolted
-onto the nearest existing skill during a broad enhancement, not placed by design. The operator's
-instinct that this was "a poor change from the enhancement works" is correct.
-
-### The deeper gap: nothing MAINTAINS the rubric
+### The one real gap: nothing MAINTAINS the rubric
 
 Even with an owner, `quality-rubric.md` is currently **write-once**. A rubric authored at
 mandate time is a snapshot, and this experiment moved underneath it repeatedly: run-002/003/004
@@ -72,48 +88,40 @@ version. The pipeline has a reader, a versioning convention, and no writer.
 
 ### TODO
 
-- [ ] **Decide the owner.** Three candidates, laid out rather than chosen:
-  - **(a) Keep it in `understand`.** Defensible — a rubric is elicited from the operator's
-    taste, which is exactly what that skill does. Cheapest option: it already works, it just
-    never ran for mandate-1.
-  - **(b) New dedicated skill, e.g. `/optimizer:rubric`.** Create / amend / version as
-    first-class operations. Fits the maintenance gap above, which neither (a) nor (c) covers.
-  - **(c) Prospector owns it.** Already writes one at handoff, and the design package it
-    produces is the natural place a quality scale comes from. But Prospector is discovery-stage
-    and is not in the loop once an experiment is running.
-- [ ] **Whoever owns it, add amend + version-bump**, not just create. A rubric that cannot
-  change is one archetype shift away from being wrong, and a wrong rubric is worse than none
-  because it will be plotted anyway.
-- [ ] **Fix the dangling reference** in `analyze/SKILL.md:126` once the owner is decided — it
-  currently names `understand` as the author in prose.
-- [ ] **Backfill mandate-1's rubric** before run-008, or accept that run-008's quality result
-  will be as unscorable as the previous seven.
-- [ ] **Separately: decide whether to build the missing "teach the user about the plugin under
-  test" skill**, and whether `learn` (which teaches about optimizer) belongs in a shared core
-  plugin alongside it. This is the operator's stated original intent for `understand` and it is
-  currently served by nothing.
+- [ ] **Run `/optimizer:understand` from the consultant repo.** Refreshes `mandate.md` (dropping
+  the dead `/ab-bench:plan` reference) and writes `quality-rubric.md` v1. *Deferred by operator
+  decision on 2026-08-06 — not blocked, not waiting on anything in this repo.* Note when doing
+  it: a v1 written now scores run-008 forward. Runs 001-007 stay unscored, and retro-scoring them
+  is not worth it — the archetype changed three times across that span, so they were never one
+  comparable series to begin with.
+- [ ] **Add an amend + version-bump path to `understand` §3b.** It authors a rubric and never
+  revises one: there is no branch for "a rubric already exists", and nothing anywhere bumps
+  `rubric_version`. `analyze` records `rubric_version` per score and `/optimizer:paper` reports
+  where the trajectory forks — so the pipeline has a reader and a versioning convention with no
+  writer. This is the genuine gap, and it is not the same problem as the missing file.
+- [ ] `analyze/SKILL.md:126` names `understand` as the rubric's author in prose. That is correct
+  — leave it.
 
 ---
 
-## 2. TODO — Partition of concerns across the three plugins is undeclared
+## 2. TODO — No written ownership table for the shared artifacts
 
-There are now three plugins (`optimizer`, `prospector`, `dod-lite`) and no document states
-which owns what. The rubric mess in §1 is the first symptom; it will not be the last. Observed
-overlaps:
+There are now four plugins (`core`, `prospector`, `optimizer`, `dod-lite`) and no single document
+states which one writes what.
 
-- **Rubric authoring** — `optimizer:understand` and `prospector:handoff` both write it.
-- **`mandate.md` authoring** — same two.
-- **Teaching** — `optimizer:learn` teaches the harness; nothing teaches the artifact.
-- **dod-lite's boundary** — dod-lite is injected unconditionally into both arms by
-  `launch-pair.mjs`, and its `.dod/` resolution is a known problem (§4). It is an engine
-  optimizer drives, but it ships as a peer plugin.
+The two "overlaps" this section originally listed turned out not to be overlaps —
+`mandate.md` and `quality-rubric.md` each have one writer per entry path, reconciled explicitly
+by `understand` §0 IMPORT MODE (see **Settled**). What remains is that the reconciliation is
+buried in one skill's step 0 rather than stated anywhere a reader would look.
 
 ### TODO
 
 - [ ] Write a short ownership table into the repo root README: for each artifact
       (`mandate.md`, `quality-rubric.md`, `dod-checks.json`, `.dod/checks/*`, `env.json`,
-      `lab/*`), exactly one plugin and one skill that writes it, plus who reads it.
-- [ ] Anything with two writers gets one removed, not documented as "both are fine".
+      `lab/*`, `.prospector/*`), exactly one plugin and one skill that writes it, plus who reads
+      it, plus the import path where a second plugin can seed it.
+- [ ] Anything that genuinely ends up with two unreconciled writers gets one removed, not
+      documented as "both are fine".
 
 ---
 
@@ -273,6 +281,40 @@ round count against a cost function dominated by context size.
       resuming after a background-Agent notification rebuilds the prefix regardless — and run-007
       cannot separate them, because control had one Stop and never resumed after it. Any run
       testing H-017 must vary the Stop-hook cost too, or it will confound the two.
+
+---
+
+## Fixed — 2026-08-06
+
+**`/prospector:start` had no concept of a symptom, so it rejected the only thing a user can
+honestly bring it.** Found by the operator running it for real: they said they were making
+videogames, the games came out bad in four named ways, they did not know why, and they wanted a
+plugin. `start` came back telling them they had supplied "a stated solution (plugin over the
+library) and a stated issue (games come out bad)" — both flagged as things not to be believed.
+
+Two errors in one.
+
+1. **The medium was treated as a proposed solution.** Prospector's entire output space is Claude
+   Code plugins. A user saying "a plugin" is naming the room, not proposing a mechanism, and
+   there is nothing to weigh it against — the skill cannot build a library.
+2. **A symptom was treated as a diagnosis.** §1 was headed *"Capture the stated issue — verbatim,
+   and do not believe it"*, and its only worked example was a genuine solution-first case ("I
+   need a tool that manages my tasks"). Applied to *"my games come out bad"*, "do not believe it"
+   is exactly backwards: the user is the sole authority on their own dissatisfaction. What must
+   not be believed is their **explanation**, never their **complaint**. Worse, nothing told the
+   skill to keep that posture internal, so it announced the rejection — leaving a user who came
+   in specifically because they *cannot* name the problem with no legal opening move at all.
+
+The data model was already right: `problem-model.md` has had separate `## Stated issue` and
+`## Observed symptoms` sections the whole time (`lib/prospector.mjs:297,308`), and `frame` never
+had the conflation. The defect was entirely in `start/SKILL.md`'s prose.
+
+Now: §1 names four layers — **medium** (constant, never remarked on), **symptom** (accepted as
+fact), **diagnosis** (a hypothesis, the thing the engagement tests), **prescription** (held
+loosest) — states that only the last two are ever challenged, forbids saying any of it out loud,
+and carries the games case as a worked example with the correct and incorrect opening moves side
+by side. Propagated to the frontmatter description, `plugins/prospector/README.md`, and
+`core/skills/learn/references/prospector.md`.
 
 ---
 

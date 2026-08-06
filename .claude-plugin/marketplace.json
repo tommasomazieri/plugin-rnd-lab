@@ -8,6 +8,11 @@
   },
   "plugins": [
     {
+      "name": "core",
+      "source": "./plugins/core",
+      "description": "Teaching entry point for the marketplace: explains both stages in plain language — Prospector (discovery: what is worth building at all) and Optimizer (A/B measurement: does it actually help) — how they chain via a pre-written mandate, and why the dod-lite auditor is a separate plugin. Ships no workflow steps and writes no files."
+    },
+    {
       "name": "optimizer",
       "source": "./plugins/optimizer",
       "description": "Control-vs-plugin A/B testing harness: creates experiment environments, fires paired sessions with everything-else-equal configs, analyzes both session JSONLs + DoD logs + human verdict into an evidence-backed improvement report."
