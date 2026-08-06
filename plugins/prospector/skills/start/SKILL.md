@@ -143,9 +143,41 @@ don't append. It is the single source of truth, and it is meant to be read by th
 
 ## 4. Know when to stop asking
 
+### The intake is a checklist, not a preamble
+
+Their opening message is the densest thing you will ever be handed, and it is easy to mine one
+sentence from it and leave the rest. **Before inquiry can close, every concrete claim in the
+verbatim intake is either followed up or explicitly deferred in writing.** Re-read it — the file,
+not your memory of it — and walk the claims one at a time.
+
+The ones that get skipped are always the same shape: *what already exists*, *what they already
+tried*, and *what they said is weak or missing*. Those are exactly the facts that turn into a
+broken reference or a re-litigated decision hours later, when it is expensive.
+
+### Three questions the engagement is not allowed to leave without
+
+None of these is optional, and none is answerable by inference:
+
+1. **Where does the input come from?** Whatever the plugin will consume — a spec, a design, a
+   list, a config — ask who produces it and how. An engagement that assumes the input already
+   exists somewhere will build an *extraction* tool for a thing nobody has *authored*, and that
+   error survives all the way to a shipped MVP before anyone notices.
+2. **What already exists here, and what is it worth?** Assets they named, assets in the repo,
+   assets they abandoned. Which are load-bearing, which are dead. Ask; never go read a thing
+   they described as dead, and never infer status from the filesystem.
+3. **What does a working week actually look like?** Session length, how many, over how long,
+   where they stop. Every later decision about cost and cadence rests on this, and inventing it
+   is how an MVP gets validated against a workflow nobody has.
+
+### Then the synthesis checkpoint
+
 Present a **synthesis checkpoint**, not raw notes: a short reading of what you now believe, with
 the weakest link named. Ask them to correct, rank, confirm, or reject it — that is far cheaper
 for them than reviewing a transcript.
+
+State how many questions you have asked and what remains unasked from the checklist above. "The
+interview has enough" is a claim, and it is yours; make it out loud where they can overrule it,
+because they are the only one who knows what you never asked about.
 
 Then decide explicitly, and say which:
 

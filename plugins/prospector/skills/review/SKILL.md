@@ -54,6 +54,11 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" evidence "<cwd>" \
     --source mvp-use --hypotheses H-003
 ```
 
+Use `--source mvp-rejected` instead when they refused vN on delivery without running it. Both
+close the package for `/prospector:build`'s §0 gate; nothing else does. A rejection on sight is
+not a failed review — it is a fast one, and it carries more information per second than any other
+answer you will get, because they could see it was useless without spending a day proving it.
+
 Use `contradicted` when use disproved something previously recorded. Do not quietly delete the
 old evidence — the contradiction is itself the finding, and a record that only ever agrees with
 its latest state cannot show anyone how the understanding moved.

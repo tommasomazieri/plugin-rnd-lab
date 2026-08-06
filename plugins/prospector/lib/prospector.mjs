@@ -263,14 +263,52 @@ export async function addDecision(root, { text, why }) {
 // ---------------------------------------------------------------- packages
 
 /**
+ * Has package vN been put in front of the user and come back with something?
+ *
+ * Closed by either `mvp-*` evidence recorded while vN was current (`mvp-use` after real use,
+ * `mvp-rejected` when they refused it on sight) or a hypothesis resolved against vN.
+ */
+export async function packageVerdict(root, v) {
+  if (v < 1) return { closed: true, reason: 'no previous package' };
+  const dir = paths(root).evidence;
+  const files = (await fs.readdir(dir).catch(() => [])).filter((f) => f.endsWith('.md'));
+  for (const f of files.sort()) {
+    const head = (await fs.readFile(path.join(dir, f), 'utf8')).split('\n---')[0];
+    if (/^source:\s*mvp-/m.test(head) && new RegExp(String.raw`^package:\s*v${v}\s*$`, 'm').test(head)) {
+      return { closed: true, reason: `evidence ${path.parse(f).name}` };
+    }
+  }
+  const resolved = (await readHypotheses(root)).hypotheses.find((h) => h.resolving_package === `v${v}`);
+  return resolved ? { closed: true, reason: `${resolved.id} resolved` } : { closed: false, reason: null };
+}
+
+/**
  * Cuts package vN and returns its dir. Frozen once written.
  *
  * Package vN and MVP plugin vN are the same number by construction: Stage 6 of idea.txt cuts
  * a package and builds an MVP as one event, so they are one version, not two.
+ *
+ * Refuses to cut vN+1 while vN has never come back from the user. The packages are supposed to
+ * be a monotonic EVIDENCE sequence — each one cut because use of the last one taught something.
+ * Skip the middle and they become a sequence of guesses that merely happens to be numbered, and
+ * the most likely reason to skip it is the worst one: the user disliked vN and the reflex is to
+ * build more rather than to find out what they expected.
  */
-export async function cutPackage(root, { changed, why, evidence, unresolved, confidence }) {
+export async function cutPackage(root, { changed, why, evidence, unresolved, confidence, unreviewed_reason }) {
   const state = await readState(root);
-  const v = (state.package_version ?? 0) + 1;
+  const prev = state.package_version ?? 0;
+  if (prev >= 1 && !unreviewed_reason) {
+    const { closed } = await packageVerdict(root, prev);
+    if (!closed) {
+      throw new Error(
+        `packages/v${prev} has never come back from the user — no mvp-* evidence recorded against it and no ` +
+        `hypothesis resolved by it. Run /prospector:review before cutting v${prev + 1}. If v${prev} was rejected ` +
+        `on sight and never used, that rejection IS the finding: record it (--source mvp-rejected), resolve its ` +
+        `hypothesis --outcome not-testable, then re-run with --unreviewed-reason "<why this is legitimate>".`,
+      );
+    }
+  }
+  const v = prev + 1;
   const dir = path.join(paths(root).packages, `v${v}`);
   if (fsSync.existsSync(dir)) throw new Error(`packages/v${v} already exists — packages are frozen once cut`);
   await fs.mkdir(dir, { recursive: true });
@@ -283,7 +321,8 @@ export async function cutPackage(root, { changed, why, evidence, unresolved, con
       `- **Why it changed:** ${why ?? '(initial)'}\n` +
       `- **Evidence that triggered it:** ${evidence ?? '(none yet)'}\n` +
       `- **Still unresolved:** ${unresolved ?? '(none recorded)'}\n` +
-      `- **Confidence moved:** ${confidence ?? 'unchanged'}\n`,
+      `- **Confidence moved:** ${confidence ?? 'unchanged'}\n` +
+      (unreviewed_reason ? `- **Cut without reviewing v${prev}:** ${unreviewed_reason}\n` : ''),
     'utf8',
   );
 

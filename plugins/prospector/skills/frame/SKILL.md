@@ -40,6 +40,34 @@ For each, state:
 At least one framing should contradict the user's own stated framing. If every candidate agrees
 with what they walked in believing, you have not reframed anything — you have paraphrased.
 
+### Then name what they all AGREE on — this is the highest-risk object in the engagement
+
+Competing framings are cheap insurance against *one* of them being wrong. They are no insurance
+at all against the premise **every one of them inherits**, and that premise is invisible
+precisely because the disagreement is where you were looking.
+
+Write it out explicitly, as its own block: **"every framing above assumes …"**. Two to four
+lines. Typical shapes — that the input exists somewhere and merely needs extracting; that the
+user is the one who will operate the thing; that the failure happens at the stage you have been
+staring at; that the artifact they described is the artifact they need.
+
+Then do two things with it:
+
+- **make one framing attack it.** A framing that denies the shared premise is worth more than a
+  fifth variation on the ones that accept it, because if the premise is wrong, every other
+  framing on the page dies at the same moment — and it will die *after* an MVP is built on it,
+  not before.
+- **record it as an `assumption`**, never `tentative` and never `confirmed`:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" evidence "<cwd>" \
+    --text "SHARED PREMISE of F1..Fn: <the assumption every framing inherits>" \
+    --status assumption --source inference
+```
+
+If you cannot find a shared premise, you have not looked. Framings written in one sitting by one
+reader always share several.
+
 ## 2. Make them react
 
 Present the framings and invite a blunt reaction. The useful responses are:

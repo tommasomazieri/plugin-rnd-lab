@@ -192,6 +192,8 @@ test('a reframe does NOT fork packages — the MVP at root has one git history',
   const d = await fresh();
   await addFraming(d, { statement: 'F one' });
   await cutPackage(d, { changed: 'first' });
+  // A reframe follows real use, so v1 comes back before v2 is cut — see the review gate below.
+  await addEvidence(d, { text: 'they used v1 and went back to the spreadsheet', source: 'mvp-use' });
   await addFraming(d, { statement: 'F two', killed_by: 'E-001' });
   const cut = await cutPackage(d, { changed: 'after reframe' });
 
@@ -225,6 +227,44 @@ test('a cut package is frozen — it cannot be silently re-cut', async () => {
   state.package_version = 0; // simulate a stale writer trying to reuse v1
   fs.writeFileSync(paths(d).state, JSON.stringify(state));
   await assert.rejects(() => cutPackage(d, { changed: 'overwrite' }), /already exists — packages are frozen/);
+});
+
+test('v2 cannot be cut while v1 has never come back from the user', async () => {
+  const d = await fresh();
+  await cutPackage(d, { changed: 'first' });
+
+  // Interview evidence is not a review. Only real use, or a rejection, closes a package.
+  await addEvidence(d, { text: 'he said he wants three legs', source: 'user-interview' });
+  await addEvidence(d, { text: 'the library has 23 headers', source: 'repo-observation' });
+  await assert.rejects(() => cutPackage(d, { changed: 'panic build' }), /never come back from the user/);
+
+  await addEvidence(d, { text: 'he rejected it on sight', source: 'mvp-rejected' });
+  assert.equal((await cutPackage(d, { changed: 'aimed at the job this time' })).version, 2);
+});
+
+test('a resolved hypothesis also closes the package', async () => {
+  const d = await fresh();
+  await cutPackage(d, { changed: 'first' });
+  const h = await addHypothesis(d, { statement: 'they will use it daily' });
+  await resolveHypothesis(d, h.id, 'refuted', 'used twice, then never again');
+  assert.equal((await cutPackage(d, { changed: 'second' })).version, 2);
+});
+
+test('the review gate can be overridden, and the override lands in the frozen record', async () => {
+  const d = await fresh();
+  await cutPackage(d, { changed: 'first' });
+  const cut = await cutPackage(d, { changed: 'second', unreviewed_reason: 'shipped broken, unusable' });
+  assert.match(fs.readFileSync(path.join(cut.dir, 'changelog.md'), 'utf8'),
+    /Cut without reviewing v1:\*\* shipped broken, unusable/);
+});
+
+test('mvp evidence from an OLDER package does not close the current one', async () => {
+  const d = await fresh();
+  await cutPackage(d, { changed: 'first' });
+  await addEvidence(d, { text: 'v1 got used', source: 'mvp-use' });   // package: v1
+  await cutPackage(d, { changed: 'second' });                          // ok
+  // v2 now current; the v1 evidence must not be reusable to wave v3 through.
+  await assert.rejects(() => cutPackage(d, { changed: 'third' }), /never come back from the user/);
 });
 
 test('stage transitions are validated against a closed set', async () => {

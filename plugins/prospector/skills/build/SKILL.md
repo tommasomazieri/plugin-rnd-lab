@@ -13,6 +13,29 @@ argument-hint: ""
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" detect "<cwd>"
 ```
 
+## 0. If a package already exists, it has to have come back first
+
+The CLI **refuses** to cut vN+1 while vN has no `mvp-*` evidence and no hypothesis resolved
+against it. That is not a formality. Packages are a monotonic *evidence* sequence — each one cut
+because use of the last one taught something — and skipping the middle turns them into numbered
+guesses.
+
+**The case this exists for: the user rejects vN the moment you hand it over.** The reflex is to
+start building whatever they just named, immediately, and it is wrong twice. It throws away the
+strongest signal the engagement has produced — *they could tell it was useless without running
+it* — and it aims vN+1 at the last sentence they said rather than at the job. Building faster is
+how you look responsive while learning nothing.
+
+Do this instead, in order, and it takes one turn:
+
+1. Record the rejection as evidence — `--source mvp-rejected`, their words verbatim.
+2. Ask **what they expected to be able to do with it**. Their answer is the job statement §2's
+   floor test needs, and you do not have it yet or vN would have passed.
+3. Resolve the hypothesis `--outcome not-testable` — it was never tested, and it keeps its rank.
+4. Only then cut vN+1, passing `--unreviewed-reason "rejected on delivery, never used"`.
+
+A rejection is a review. Run it as one.
+
 Read `problem-model.md`, the ranked hypotheses, and `framings.md` first.
 
 **The hypothesis is not the spec. The job is the spec.** Confirm two separate things with the

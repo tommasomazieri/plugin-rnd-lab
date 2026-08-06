@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   findRoot, paths, scaffold, readState, writeState, setStage,
-  readHypotheses, addHypothesis, resolveHypothesis, rankHypotheses,
+  readHypotheses, addHypothesis, resolveHypothesis, rankHypotheses, packageVerdict,
   addEvidence, addFraming, addDecision, cutPackage, packageDir,
   STAGES, STATUSES, OUTCOMES,
 } from './prospector.mjs';
@@ -85,6 +85,9 @@ async function cmdDetect(dir) {
     resolved_hypotheses: doc.hypotheses.filter((h) => h.status === 'resolved').length,
     evidence_count: (await fs.readdir(paths(root).evidence).catch(() => [])).filter((x) => x.endsWith('.md')).length,
     packages: packages.sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))),
+    // Surfaced on every skill's first call, because the package that never came back is the
+    // one thing that silently invalidates whatever the next stage is about to conclude.
+    current_package_reviewed: (await packageVerdict(root, state.package_version ?? 0)).closed,
     handoff_written: fsSync.existsSync(path.join(root, '.ab-bench')),
   });
 }
@@ -138,10 +141,16 @@ async function cmdDecision(dir, f) {
 
 async function cmdPackage(dir, f) {
   const root = requireRoot(dir);
-  const res = await cutPackage(root, {
-    changed: f.changed, why: f.why, evidence: f.evidence,
-    unresolved: f.unresolved, confidence: f.confidence,
-  });
+  let res;
+  try {
+    res = await cutPackage(root, {
+      changed: f.changed, why: f.why, evidence: f.evidence,
+      unresolved: f.unresolved, confidence: f.confidence,
+      unreviewed_reason: f['unreviewed-reason'],
+    });
+  } catch (e) {
+    die(e.message);
+  }
   out({
     ...res,
     write_package_md_to: path.join(res.dir, 'package.md'),
@@ -188,6 +197,7 @@ const HELP = `prospector-cli <command> <dir> [flags]
   framing    --statement --target --need --outcome --killed-by
   decision   --text --why
   package    --changed --why --evidence --unresolved --confidence
+             [--unreviewed-reason "<why vN-1 was never reviewed>"]  refuses without it
   handoff    --payload <file.json> [--force]
 `;
 
