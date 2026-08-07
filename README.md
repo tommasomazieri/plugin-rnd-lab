@@ -89,6 +89,10 @@ claude plugin install dod-lite@plugin-rnd-lab       # required by optimizer: its
 `core` ships one skill, `/core:learn`, and writes nothing — it is the walkthrough for everything
 below. Install it first if you have not used either instrument before.
 
+**Upgrading from the `ab-bench` era?** Every command was renamed (`/ab-bench:*` → `/optimizer:*`)
+and two plugins are new. See [CHANGELOG.md](CHANGELOG.md) — existing experiments need no
+migration, but leave your `.ab-bench/` directories alone.
+
 `dod-lite` must be installed for `/optimizer:fire` to work. An installed plugin cannot reach
 files outside its own directory, so the Optimizer resolves the audit instrument as a cached
 sibling — and refuses to launch a run at all if it is missing, rather than producing an

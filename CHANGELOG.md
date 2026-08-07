@@ -1,0 +1,279 @@
+# Changelog
+
+## The discovery release — `ab-bench` becomes a two-instrument loop
+
+**Comparing `8d6a671` (2026-08-04) → `5b99069` (2026-08-07).**
+Baseline: the marketplace when it shipped **one instrument** — `ab-bench 0.4.0`, plus `dod-lite
+0.3.0` as its arm-side auditor. Everything below is the difference between that state and the
+current one, stated end-to-end rather than as the path taken.
+
+|  | before | after |
+|---|---|---|
+| plugins | 2 — `ab-bench` 0.4.0, `dod-lite` 0.3.0 | 4 — `core` 0.1.0, `prospector` 0.5.0, `optimizer` 0.7.0, `dod-lite` 0.4.0 |
+| skills | 9 (all `ab-bench`) | 18 |
+| tests | 104 | 154 |
+| what it answered | *does the thing I built help?* | *is this worth building at all?* **and** *does it help?* |
+| shape | a linear harness | a loop |
+
+71 files changed, +6,350 / −1,082.
+
+---
+
+## ⚠ Breaking
+
+### `ab-bench` is renamed to `optimizer`
+
+Every command moves: `/ab-bench:init` → `/optimizer:init`, and so on for `setup`, `understand`,
+`plan`, `fire`, `analyze`, `paper`, `status`. The plugin directory is `plugins/optimizer/`.
+
+**Four tokens are deliberately NOT renamed, and must stay frozen:**
+
+- `.ab-bench/` — the on-disk identity directory
+- `AB_BENCH_DIR` in `lib/state.mjs`
+- `ab-bench-scaffold.mjs`
+- `.ab-bench-snapshot.json`
+
+These are data-format identifiers, not branding. Renaming them orphans every experiment already on
+disk, and the repo would gain nothing but tidiness in exchange.
+
+### `/ab-bench:learn` is deleted, not moved
+
+Teaching now lives in the new `core` plugin as `/core:learn`, because it has to cover *two*
+instruments and the chain between them. A skill inside one instrument cannot be the entry point
+for both.
+
+---
+
+## Added
+
+### `prospector` — the discovery stage (new plugin, 0.5.0, 9 skills)
+
+The Optimizer starts from an already-defined artifact and makes its execution efficient; it
+assumes the right problem has already been chosen. Prospector starts one step earlier, from
+ambiguity, and decides what is worth solving at all. It optimises for **effectiveness**, the
+Optimizer for **efficiency**.
+
+```
+/prospector:start     record what they walked in with, verbatim; open the inquiry
+/prospector:survey    does this already exist? — three verdicts, one ends the engagement
+/prospector:frame     competing framings → adopt one → ranked hypotheses
+/prospector:design    blueprint.md — the WHOLE plugin, before anything is built
+/prospector:build     cut package vN + build MVP plugin vN, shallow on purpose
+/prospector:review    turn real use into evidence; resolve or refute
+/prospector:handoff   write mandate.md + quality-rubric.md for the Optimizer
+/prospector:reenter   after an Optimizer cycle: what's still missing, what's next
+/prospector:status    where the engagement stands, read-only
+```
+
+It runs **in place**, in the directory the future plugin will live in — no experiments root, no
+second root, nothing to cd into, because it never runs paired sessions. `.prospector/` is
+**tracked in git**, unlike the Optimizer's `.ab-bench/`: that one is ignored because its
+`state.json` holds absolute machine paths, and Prospector stores none. The record ships as
+provenance with the plugin it produced.
+
+The load-bearing rules:
+
+- **Four layers arrive together and only two are ever challenged.** The *medium* ("a plugin") is
+  constant. The *symptom* ("my output comes out bad") is accepted as fact — the user is the sole
+  authority on their own dissatisfaction. The *diagnosis* is a hypothesis, and testing it is what
+  the engagement is for. The *prescription* is held loosest. So "my output is bad and I don't know
+  why" is the **strongest** possible opening, not a deficient one.
+- **The need list is the denominator, and the agent that builds does not author it.** Every need
+  the user states is recorded during the interview as `N-NNN`, citing the evidence file it came
+  from; the CLI refuses a `stated` need with no `E-NNN`. `/prospector:build` **cannot cut a
+  package** while any core stated need is neither covered nor deferred — no override flag.
+  Deferring with a written reason *is* the override, and it lands in the frozen changelog.
+- **The MVP is narrow in DEPTH, never in BREADTH.** It must span everything the user asked for,
+  roughly, rather than nail one part of it. What gets cut is polish, generality, configurability,
+  and edge cases — the hard half of each need before any need entirely.
+- **The design is a separate stage from the build.** `blueprint.md` is written while there is
+  nothing to be loyal to; `build` reads it. An agent that designs and implements in one turn
+  writes a design its implementation happens to satisfy.
+- **Uncertainty is labelled, always** — `confirmed`, `strongly-supported`, `tentative`,
+  `assumption`, `unknown`, `contradicted`. An inference is never recorded as user-confirmed fact.
+- **Two ranked lists that deliberately disagree.** Hypotheses rank by *expected learning* with
+  confidence **inverted** (a 50/50 teaches most) — that answers *what to find out next*. Needs
+  rank by *value*, uninverted — that answers *what to build next*. Using the first to decide
+  builds aims every version at the least-understood thing on the page.
+
+### `core` — the teaching plugin (new, 0.1.0)
+
+`/core:learn [optimizer|prospector|chain|<stage>|<question>]`. A router: a short `SKILL.md` plus
+reference files read on demand. **Writes nothing**, never auto-triggers, walks a lifecycle stage
+by stage rather than dumping a wall of text.
+
+### `/prospector:survey` — prior art, with an honest negative
+
+Checks whether the thing already exists **before** any framing work commits you to building it.
+Five sources: what the user already has registered, the community marketplace's `marketplace.json`
+(fetchable as raw JSON), Anthropic's demo plugins, the open web, and — the best of the five —
+asking what they already tried, because it is the only one that reports *why* something failed.
+
+Three verdicts, all legal, and one is **terminal**: *"this already exists, install it, we're
+done."* A discovery instrument that cannot return "don't build this" is a build-justification
+machine, and one install beats three versions and a month.
+
+Negative results record as `unknown`, never `confirmed`. There is no plugin search API and no
+aggregator of third-party marketplaces, so absence of evidence is not evidence of absence — the
+same split `dod-lite` makes between a failing artifact and a grader that could not open one.
+
+### The loop — `/prospector:reenter` and the Optimizer's return path
+
+The pipeline was linear and greenfield-only. It is now a cycle:
+
+```
+prospector: start → survey → frame → design → build → review → handoff
+                                ↑                                 ↓
+                                └───── reenter ←── optimizer: init → plan → fire → analyze
+```
+
+`prospector-cli detect` gains a third status, **`post-optimizer`** — a blueprint exists *and* at
+least one run has been analysed (both, because a handoff with no analysed run has produced nothing
+new to re-enter on). Re-entry reads `.ab-bench/state.json`'s `testenv_root`, the mirror image of
+what `handoff` already does writing `mandate.md` into that same directory: still a filesystem
+contract in a shared working dir, still no cross-plugin code access, which is not available in
+either direction. It scans **every** mandate and env, not just the current one, because that
+pointer only moves forward and reading only the current mandate would discard everything learned
+before the last scope change.
+
+It ingests the A/B evidence, diffs the shipped surface against the blueprint's build order,
+re-interviews on real use, re-runs the survey, revises the blueprint, and ranks the next slice by
+value.
+
+`analysis/fix-list.md` is deliberately **not** re-entry's to execute — its reader is the operator,
+by hand, in the plugin's own repo, and that is by design. Re-entry reads it only to classify: an
+item meaning *"does the wrong thing"* is a discovery finding, *"does the right thing slowly"* is
+named and handed back untouched. Mixing efficiency fixes into `vN+1` makes the user's reaction to
+that version unattributable.
+
+`/optimizer:analyze` gains **§7b**, the return path specified from the start and never built: when
+the finding is that the plugin is aimed at the wrong job rather than executing it badly, it says so
+and names `/prospector:reenter`. The Optimizer still never redefines the problem itself — it is
+simply the instrument most likely to notice that the problem needs redefining, and silence there is
+not neutrality.
+
+### The handoff — Prospector writes the Optimizer's mandate
+
+`/optimizer:understand` interviews seven categories. A finished discovery engagement has already
+established six, so `/prospector:handoff` writes `mandate.md` and `quality-rubric.md` directly and
+`understand` detects them and switches to **import mode** — confirming section by section and
+asking only for **§6 Appropriate task complexity**, the one category about A/B signal strength
+rather than about the problem.
+
+`handoff` refuses to overwrite an existing mandate: that is a live experiment's north star, and
+replacing it would retroactively change what every past run was measured against.
+
+---
+
+## Changed — `optimizer` 0.4.0 → 0.7.0
+
+### A DoD check may never be the artifact's own gate
+
+Plugin-native checkers are now **forbidden**, not preferred. `plan` step 4b used to say: if the
+plugin under test ships a checker covering a criterion, use it instead of writing a generic one.
+A real run followed that and shipped a check that shelled out to the plugin's own validator —
+while the same plugin shipped a Stop hook blocking until that validator returned clean. The check
+could only ever report `pass`. It did, on 3 of 3 turns, while the delivered artifact scored zero.
+
+Three reasons, any one sufficient: a check only one arm can run grades only one arm, so that
+column holds no comparison; a criterion the artifact already enforces internally cannot fail; and
+the artifact under test must function autonomously, as if no DoDs existed.
+
+`source` now has exactly one legal value, `generic`, both arms' lists must be identical, and
+`fire` blocks on any asymmetry.
+
+### The probe gate is two-sided
+
+The seed probe proved a check could **fail**. It could not prove a check could ever **pass**, and
+that is where the real defects were. `probe-checks.mjs` now proves both directions mechanically.
+
+### Measurement bugs that were corrupting results
+
+- **Background-Agent completions were being scored as operator turns.** A finished Agent re-enters
+  the session as a plain `type: "user"` entry — not meta, not a tool_result, not a sidechain — and
+  fell straight through to `user_real`. It corrupted four numbers from one root cause. Not a
+  symmetric error: only an arm that *delegates* receives these, and that is always the test arm,
+  so the instrument penalised the behaviour under test. The count now lives in its own
+  `user_system_reentry` field rather than being dropped, because a large asymmetry there *is* the
+  delegation signal.
+- **`.dod/` is now opaque to arms in both directions.** It denied writes; reads were open, and both
+  arms junction to the *same* shared `.dod`, so either arm could read the other's scorecard.
+- **A grader that cannot open the artifact records `error`, not `fail`.** The verdict contract
+  gains `gradeable`. The checker system prompt said "inconclusive or unverifiable is a fail" with
+  no exception for the grader's own blindness.
+- **`STUB TRANSCRIPT` no longer fires on subagent digests** — a subagent session has no operator
+  turns by construction, so "0 real user turns" was definitional rather than diagnostic.
+
+### The report gained a second reader
+
+`analyze` now emits `analysis/fix-list.md` beside `report.md`, on purpose for a different reader:
+`report.md` is the evidentiary record and feeds the next planning cycle; `fix-list.md` is the work
+order for a session that has read nothing else — absolute paths, named functions, a measured number
+per item, expected effect, priority by the objective's pillar.
+
+### Continuity fixes
+
+- `plan` step 0b: picking anything below rank 1 requires a written reason, and a hypothesis
+  skipped twice goes to the user to fire or withdraw. Hypotheses on the priority pillar were
+  ageing out of attention without ever being rejected, because every `analyze` banks fresh ones
+  carrying the most vivid evidence.
+- **Regression points are recorded for every run**, tagged `frozen` vs `run`, instead of only on
+  regression runs — which never fired, leaving the curve empty while eight consecutive misses of
+  the priority pillar went unnoticed.
+- `understand` §3b-ii: the quality rubric can now be **amended**, not only authored. Clarifications
+  keep the version; scale changes bump it and write a changelog entry, and a bump forks the quality
+  trajectory.
+
+### Ownership is written down
+
+The root README gains a **"Who writes what"** table — four plugins share a working directory, so
+every artifact has exactly one writer, and anything with two unreconciled writers is a bug. Plus a
+**"Settled — do not re-open"** section for the decisions that kept getting re-litigated.
+
+---
+
+## Changed — `dod-lite` 0.3.0 → 0.4.0
+
+The checker verdict contract gains `gradeable`, separating "the artifact failed" from "the grader
+could not see the artifact". Absent field is treated as gradeable, so older checks keep working.
+
+`dod-lite` remains **a separate plugin, permanently, and this is not an unresolved boundary.** An
+arm session must load the auditor and nothing else; folding it into the Optimizer would enable
+`plan`, `fire`, and `analyze` inside the very sessions being measured, and an arm that can invoke
+`/optimizer:plan` can design its own Definition-of-Done.
+
+---
+
+## Unchanged, and worth restating
+
+These were already true at the baseline and remain load-bearing:
+
+- **DoD checks are observational only.** The `Stop` hook writes nothing to stdout — no decision, no
+  reason, no message. Injected into both arms identically, any feedback would pull control and test
+  toward the same output and mask the difference being measured. Two regression tests assert that
+  silence directly.
+- **Every arm is pinned to something immutable**: a ref → cached worktree, a clean tree → HEAD sha,
+  a dirty tree → content-hashed copy. Arms never read a live repo.
+- **No aggregate score.** One declared priority pillar plus regression guards on the other four,
+  across `quality`, `input_tokens`, `output_tokens`, `turns`, `autonomy`.
+
+---
+
+## Upgrading
+
+```bash
+claude plugin marketplace update plugin-rnd-lab
+claude plugin install core@plugin-rnd-lab           # new — teaches both stages
+claude plugin install prospector@plugin-rnd-lab     # new — the discovery stage
+```
+
+`optimizer` and `dod-lite` update in place. Then:
+
+- Replace `/ab-bench:*` with `/optimizer:*` in any notes or scripts.
+- **Leave `.ab-bench/` directories exactly as they are.** Existing experiments keep working;
+  renaming that directory orphans them.
+- `/ab-bench:learn` no longer exists — use `/core:learn`.
+- `optimizer` will not fire without `dod-lite` installed; that was already true.
+
+Existing experiments need no migration. `env.json` schema 1 is still synthesized into a single
+`plugin-dir` artifact, and backward compatibility is tested.
