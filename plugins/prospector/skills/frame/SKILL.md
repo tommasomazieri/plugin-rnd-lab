@@ -16,8 +16,12 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" detect "<cwd>"
 
 `{"status":"fresh"}` → nothing here yet; tell them to run `/prospector:start` and stop.
 
-Read `.prospector/problem-model.md` and every file in `.prospector/evidence/` before drafting
-anything. Framings that are not built on recorded evidence are just opinions with structure.
+Read `.prospector/problem-model.md`, every file in `.prospector/evidence/`, and the needs list
+(`needs list "<cwd>"`) before drafting anything. Framings that are not built on recorded evidence
+are just opinions with structure.
+
+If `/prospector:survey` has not run, run it first. A framing contest between four readings of a
+problem someone has already solved is an expensive way to reach the wrong stage.
 
 ## 1. Generate a SMALL number of competing framings
 
@@ -77,6 +81,11 @@ Present the framings and invite a blunt reaction. The useful responses are:
 
 "Partly" is the most informative answer and usually means a fifth framing is hiding between two
 of yours. Chase it rather than forcing a choice between what you already wrote.
+
+**Everything they name while reacting is a need.** This conversation is dense with them — being
+shown a wrong framing is what makes people articulate the thing they actually want. Record each
+one as it lands (`evidence`, then `needs add --kind stated --evidence E-NNN`), before moving on.
+A framing discussion that produces no new needs was a discussion nobody engaged with.
 
 ## 3. Adopt the framing
 
@@ -144,8 +153,15 @@ user's actual job and uses this ranking only to choose what to watch *inside* th
 hypothesis that nothing job-shaped could test is one you **ask about in session, for free** —
 not one you ship as a plugin.
 
+There is a second ranking, and confusing the two is a real error. `needs rank` orders by **value**
+— importance × provenance × confidence, uninverted — and answers "what should we build next". Use
+that one at `/prospector:reenter`, when the problem is known and the question is which improvement
+is worth most. Use this one while the problem is still unknown.
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" stage "<cwd>" --to hypotheses
 ```
 
-Then go to `/prospector:build` to put the chosen hypothesis in front of real use. Commit.
+Then `/prospector:design` — the whole-plugin design, written before anything is built and while
+there is still nothing to be loyal to. `build` comes after it and will refuse to cut a package
+that leaves a core stated need unaccounted for. Commit.

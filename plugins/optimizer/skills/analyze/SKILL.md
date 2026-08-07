@@ -401,3 +401,31 @@ Apply fixes to the plugin-under-test in ITS OWN repo — which, unlike before, i
 don't confuse "editing the plugin" with "touching `.ab-bench/` or the testenv folder," those are
 never where the plugin's actual source lives. Then `/optimizer:plan` for the next run. optimizer
 never edits the plugin under test itself.
+
+### 7b. When the finding is not about efficiency at all — send it back
+
+Everything above assumes the plugin is doing the right thing and the question is how well. Check
+whether that assumption still holds, because this is the one failure the harness cannot see: every
+pillar is a measure of execution, and a plugin aimed at the wrong job can post clean numbers on all
+five while being worthless.
+
+The signals, from the run you just analysed:
+
+- the fix-list is mostly *"the user had to redo this"* / *"it solved a problem they didn't have"*
+  rather than *"this costs too many turns"*;
+- an arm delivered, scored well, and the operator's verdict was still that the output was not what
+  they wanted;
+- `mandate.md`'s capability gap no longer describes what the plugin is actually being used for;
+- successive runs keep confirming hypotheses while the plugin gets no more useful.
+
+**Say so explicitly and name `/prospector:reenter` as the next step**, in the plugin's own repo.
+Optimizing an artifact aimed at the wrong problem makes the wrong thing arrive faster, and eight
+efficient runs is an expensive way to find that out.
+
+This is the return path the chain has always specified — the Optimizer never redefines the problem
+itself, but it is the instrument most likely to notice that the problem needs redefining, and
+staying silent about it is not neutrality. Prospector re-opens discovery, revises the design, and
+hands back a new mandate; a scope change on this side is `/optimizer:init mandate`.
+
+If Prospector was never used on this plugin, the same signal means the mandate needs re-interviewing
+— `/optimizer:understand`. Do not simply keep planning runs against it.

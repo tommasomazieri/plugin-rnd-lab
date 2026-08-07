@@ -1,13 +1,13 @@
 {
   "name": "prospector",
   "displayName": "Prospector",
-  "description": "Discovery-stage counterpart to the Optimizer. Starts from ambiguity rather than a spec: interviews for evidence instead of accepting the stated issue, maintains a living problem model, keeps competing problem framings alive, tracks hypotheses with explicit confidence, and builds MVP plugins that are narrow in scope but always do the user's real job, because their real use is the primary evidence. Optimises for effectiveness — solving the right problem — and hands a validated direction to the Optimizer, which then makes its execution efficient.",
-  "version": "0.4.0",
+  "description": "Discovery-stage counterpart to the Optimizer. Starts from ambiguity rather than a spec: interviews for evidence instead of accepting the stated issue, surveys existing solutions before designing (and can end an engagement with \"this already exists\"), maintains a living problem model, keeps competing problem framings alive, and enumerates every need the user states as a machine-checkable denominator. Designs the whole plugin before building any of it, then ships MVPs that are shallow on purpose but never narrow — a package cannot be cut while a core stated need is neither covered nor deferred with a written reason. Optimises for effectiveness, hands a validated direction to the Optimizer, and re-enters afterwards to scope the next version from the A/B evidence.",
+  "version": "0.5.0",
   "author": {
     "name": "Tommaso Mazieri"
   },
   "homepage": "https://github.com/tommasomazieri/plugin-rnd-lab/tree/master/plugins/prospector",
   "repository": "https://github.com/tommasomazieri/plugin-rnd-lab",
   "license": "MIT",
-  "keywords": ["design-thinking", "problem-definition", "discovery", "user-research", "mvp"]
+  "keywords": ["design-thinking", "problem-definition", "discovery", "user-research", "mvp", "prior-art", "product-iteration"]
 }

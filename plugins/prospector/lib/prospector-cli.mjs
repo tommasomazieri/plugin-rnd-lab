@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 import {
   findRoot, paths, scaffold, readState, writeState, setStage,
   readHypotheses, addHypothesis, resolveHypothesis, rankHypotheses, packageVerdict,
+  readNeeds, addNeed, coverNeed, deferNeed, withdrawNeed, reopenNeed, rankNeeds, blockingNeeds,
   addEvidence, addFraming, addDecision, cutPackage, packageDir,
-  STAGES, STATUSES, OUTCOMES,
+  STAGES, STATUSES, OUTCOMES, NEED_KINDS, NEED_IMPORTANCE,
 } from './prospector.mjs';
 import { writeHandoff } from './handoff.mjs';
 
@@ -69,15 +70,83 @@ async function cmdInit(dir, f) {
   });
 }
 
+/**
+ * Finds the Optimizer's analysed runs, if any have been fired since the handoff.
+ *
+ * Reading `.ab-bench/state.json` is the mirror image of what `/prospector:handoff` already does
+ * when it writes `mandate.md` into that same directory: a filesystem contract in the shared
+ * working dir. There is still no code dependency in either direction, and there cannot be — a
+ * plugin cannot reach another plugin's install directory.
+ *
+ * The runs themselves live in the Optimizer's testenv, whose location prospector has no way to
+ * guess (`experiments_root` is the Optimizer's userConfig). `state.json.testenv_root` is the only
+ * bridge, which is why this returns nothing rather than searching when the file is absent.
+ */
+async function optimizerRuns(root) {
+  const stateFile = path.join(root, '.ab-bench', 'state.json');
+  let abState;
+  try {
+    abState = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  } catch {
+    return { testenv_root: null, analyzed_runs: [] };
+  }
+  const base = abState.testenv_root;
+  if (!base || !fsSync.existsSync(base)) return { testenv_root: base ?? null, analyzed_runs: [] };
+
+  // Scan every mandate/env, not just the current one — a re-entry wants everything the Optimizer
+  // has ever learned about this plugin, and `state.json`'s pointer only ever moves forward.
+  const analyzed = [];
+  const dirs = async (p) => (await fs.readdir(p, { withFileTypes: true }).catch(() => []))
+    .filter((d) => d.isDirectory()).map((d) => d.name);
+  for (const m of await dirs(base)) {
+    if (!/^mandate-\d+$/.test(m)) continue;
+    for (const e of await dirs(path.join(base, m))) {
+      if (!/^env-\d+$/.test(e)) continue;
+      const runsDir = path.join(base, m, e, 'runs');
+      for (const r of await dirs(runsDir)) {
+        if (!/^run-\d+$/.test(r)) continue;
+        const report = path.join(runsDir, r, 'analysis', 'report.md');
+        if (fsSync.existsSync(report)) {
+          analyzed.push({
+            run: r,
+            mandate: m,
+            env: e,
+            report,
+            fix_list: path.join(runsDir, r, 'analysis', 'fix-list.md'),
+          });
+        }
+      }
+    }
+  }
+  analyzed.sort((a, b) => a.run.localeCompare(b.run));
+  return {
+    testenv_root: base,
+    lab: path.join(base, abState.current_mandate ?? 'mandate-1', abState.current_env ?? 'env-1', 'lab'),
+    ledger: path.join(base, abState.current_mandate ?? 'mandate-1', abState.current_env ?? 'env-1', 'ledger.md'),
+    analyzed_runs: analyzed,
+  };
+}
+
 async function cmdDetect(dir) {
   const root = findRoot(dir);
   if (!root) return out({ status: 'fresh' });
   const state = await readState(root);
   const doc = await readHypotheses(root);
+  const needsDoc = await readNeeds(root);
   const pkgDir = paths(root).packages;
   const packages = (await fs.readdir(pkgDir).catch(() => [])).filter((d) => /^v\d+$/.test(d));
+  const opt = await optimizerRuns(root);
+  const blocking = blockingNeeds(needsDoc);
+
+  // `post-optimizer` means a full cycle has closed: something was built, handed off, and measured.
+  // That is a different engagement from `existing` — the problem is no longer unknown, so
+  // /prospector:reenter ranks by value rather than by expected learning, and the blueprint is
+  // revised rather than authored. Both conditions are required: a handoff with no analysed run
+  // has produced no new evidence to re-enter ON.
+  const postOptimizer = opt.analyzed_runs.length > 0 && fsSync.existsSync(paths(root).blueprint);
+
   out({
-    status: 'existing',
+    status: postOptimizer ? 'post-optimizer' : 'existing',
     root,
     ...paths(root),
     state,
@@ -89,6 +158,15 @@ async function cmdDetect(dir) {
     // one thing that silently invalidates whatever the next stage is about to conclude.
     current_package_reviewed: (await packageVerdict(root, state.package_version ?? 0)).closed,
     handoff_written: fsSync.existsSync(path.join(root, '.ab-bench')),
+    blueprint_written: fsSync.existsSync(paths(root).blueprint),
+    // The breadth gate's state, reported BEFORE a cut is attempted, for the same reason
+    // current_package_reviewed is: an agent that discovers it at `package` time has already
+    // written the MVP against the wrong scope.
+    needs_total: needsDoc.needs.length,
+    needs_open: needsDoc.needs.filter((n) => n.status === 'open').length,
+    needs_deferred: needsDoc.needs.filter((n) => n.status === 'deferred').length,
+    needs_blocking_a_cut: blocking.map((n) => n.id),
+    optimizer: opt,
   });
 }
 
@@ -113,6 +191,40 @@ async function cmdHypothesis(dir, sub, f) {
     out((await readHypotheses(root)).hypotheses);
   } else {
     die(`unknown hypothesis subcommand "${sub}" (add|resolve|rank|list)`);
+  }
+}
+
+async function cmdNeeds(dir, sub, f) {
+  const root = requireRoot(dir);
+  const ids = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  try {
+    if (sub === 'add') {
+      out(await addNeed(root, {
+        statement: f.statement,
+        verbatim: f.verbatim,
+        evidence: ids(f.evidence),
+        kind: f.kind,
+        importance: f.importance,
+        confidence: f.confidence === undefined ? undefined : Number(f.confidence),
+      }));
+    } else if (sub === 'cover') {
+      out(await coverNeed(root, f.id, typeof f.version === 'string' ? f.version : undefined));
+    } else if (sub === 'defer') {
+      out(await deferNeed(root, f.id, typeof f.reason === 'string' ? f.reason : null));
+    } else if (sub === 'withdraw') {
+      out(await withdrawNeed(root, f.id, typeof f.reason === 'string' ? f.reason : null));
+    } else if (sub === 'reopen') {
+      out(await reopenNeed(root, f.id));
+    } else if (sub === 'rank') {
+      out(rankNeeds(await readNeeds(root)));
+    } else if (sub === 'list') {
+      const doc = await readNeeds(root);
+      out({ needs: doc.needs, blocking_a_cut: blockingNeeds(doc).map((n) => n.id) });
+    } else {
+      die(`unknown needs subcommand "${sub}" (add|list|rank|cover|defer|withdraw|reopen)`);
+    }
+  } catch (e) {
+    die(e.message);
   }
 }
 
@@ -193,11 +305,20 @@ const HELP = `prospector-cli <command> <dir> [flags]
              add:     --statement --assumption --why --expected --validation
                       --success --failure --confidence
              resolve: --id H-001 --outcome <${OUTCOMES.join('|')}> --note
+  needs      add|list|rank|cover|defer|withdraw|reopen
+             add:     --statement --verbatim --evidence E-001,E-004
+                      --kind <${NEED_KINDS.join('|')}> --importance <${NEED_IMPORTANCE.join('|')}>
+                      --confidence      (stated/observed REQUIRE --evidence)
+             cover:   --id N-001 [--version v2]
+             defer:   --id N-001 --reason "<why not this version>"   refuses without it
+             rank:    by VALUE (importance x provenance x confidence) — NOT the
+                      inverted-confidence learning ranking "hypothesis rank" uses
   evidence   --text --status <${STATUSES.join('|')}> --source --hypotheses H-001,H-002
   framing    --statement --target --need --outcome --killed-by
   decision   --text --why
   package    --changed --why --evidence --unresolved --confidence
              [--unreviewed-reason "<why vN-1 was never reviewed>"]  refuses without it
+             also refuses while any core stated need is neither covered nor deferred
   handoff    --payload <file.json> [--force]
 `;
 
@@ -207,14 +328,17 @@ async function main() {
 
   const positional = rest.filter((a) => !a.startsWith('--'));
   const f = flags(rest);
-  const isHypothesis = cmd === 'hypothesis';
-  const dir = (isHypothesis ? positional[1] : positional[0]) ?? process.cwd();
+  // `hypothesis` and `needs` take a subcommand before the dir, every other command takes the dir
+  // first. Keep this list in sync with the switch below or the dir silently becomes the subcommand.
+  const hasSubcommand = cmd === 'hypothesis' || cmd === 'needs';
+  const dir = (hasSubcommand ? positional[1] : positional[0]) ?? process.cwd();
 
   switch (cmd) {
     case 'init': return cmdInit(dir, f);
     case 'detect': return cmdDetect(dir);
     case 'stage': return cmdStage(dir, f);
     case 'hypothesis': return cmdHypothesis(dir, positional[0], f);
+    case 'needs': return cmdNeeds(dir, positional[0], f);
     case 'evidence': return cmdEvidence(dir, f);
     case 'framing': return cmdFraming(dir, f);
     case 'decision': return cmdDecision(dir, f);

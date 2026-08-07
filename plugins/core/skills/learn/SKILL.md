@@ -36,8 +36,8 @@ a choice to be made.
 |---|---|
 | nothing (`$ARGUMENTS` empty) | Give the model above, then ask **which of the two they are on** — or whether they want the whole tour. Do not read a reference file before they answer, and do not dump both. |
 | `optimizer`, or any optimizer stage (`setup`, `init`, `understand`, `plan`, `fire`, `parallel`, `analyze`, `status`, `discipline`) | Read `${CLAUDE_SKILL_DIR}/references/optimizer.md` |
-| `prospector`, or any prospector stage (`start`, `frame`, `build`, `review`, `handoff`, `status`) | Read `${CLAUDE_SKILL_DIR}/references/prospector.md` |
-| `chain`, `handoff`, `mandate`, `dod-lite`, "how do they fit together", "why is dod-lite separate" | Read `${CLAUDE_SKILL_DIR}/references/chain.md` |
+| `prospector`, or any prospector stage (`start`, `survey`, `frame`, `design`, `build`, `review`, `handoff`, `reenter`, `status`) | Read `${CLAUDE_SKILL_DIR}/references/prospector.md` |
+| `chain`, `handoff`, `mandate`, `reenter`, `dod-lite`, "how do they fit together", "how do I iterate on a plugin that already exists", "why is dod-lite separate" | Read `${CLAUDE_SKILL_DIR}/references/chain.md` |
 | the full tour | All three, in order: prospector → chain → optimizer. This is long — walk it stage by stage. |
 | a free-form question ("how do I compare against an old version", "what happens if I close a terminal", "why did my games question get rejected") | Read whichever file(s) cover it and answer directly. Do not walk a lifecycle they did not ask for. |
 
@@ -51,10 +51,15 @@ a choice to be made.
   reference does not cover, read the relevant `SKILL.md` under `plugins/<plugin>/skills/`
   rather than guessing. `plugins/dod-lite/` has no skills to read — it is a hooks-only engine;
   see `references/chain.md`.
-- Keep the two vocabularies straight. Prospector has *framings*, *evidence*, *hypotheses ranked
-  by expected learning*, and *packages*. Optimizer has *mandates*, *envs*, *runs*, *arms*,
-  *pillars*, and a separate *hypothesis ledger* ranked by magnitude × confidence ÷ cost. Both
-  say "hypothesis" and they are not the same object — say so if the user is moving between them.
+- Keep the two vocabularies straight. Prospector has *framings*, *evidence*, *needs*, a
+  *blueprint*, *hypotheses ranked by expected learning*, and *packages*. Optimizer has *mandates*,
+  *envs*, *runs*, *arms*, *pillars*, and a separate *hypothesis ledger* ranked by magnitude ×
+  confidence ÷ cost. Both say "hypothesis" and they are not the same object — say so if the user
+  is moving between them.
+- Prospector itself has **two** ranked lists that deliberately disagree: hypotheses rank by
+  expected learning (confidence inverted — what to *find out* next), needs rank by value
+  (uninverted — what to *build* next). If a user is asking what to build and you quote the
+  hypothesis ranking, you have given them the wrong answer. `chain.md` has the three-way table.
 
 ## Closing — always end with their actual next command
 
@@ -64,11 +69,15 @@ Tell them the natural next move given where they are:
 it, `/prospector:start`.
 
 **Mid-engagement in Prospector** → `/prospector:status` will say; generally
-`frame` → `build` → *(go use it for real)* → `review`, looping until a direction holds, then
-`/prospector:handoff`.
+`survey` → `frame` → `design` → `build` → *(go use it for real)* → `review`, looping until a
+direction holds, then `/prospector:handoff`.
 
 **A plugin exists and needs proving** → `/optimizer:setup` if the experiments root was never
 set, otherwise cd into the plugin's own repo and `/optimizer:init`.
 
 **Mid-experiment in Optimizer** → `/optimizer:status` will say; generally `plan` → `fire` →
 *(work both arms)* → `analyze`.
+
+**A plugin exists, has been through the Optimizer, and the question is what's still missing** →
+`/prospector:reenter` in the plugin's own repo. This is the loop closing, and it is the case
+people miss: Prospector is not only for starting from nothing.

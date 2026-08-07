@@ -15,7 +15,9 @@ import path from 'node:path';
 export const DIR = '.prospector';
 export const SCHEMA = 1;
 
-export const STAGES = ['intake', 'inquiry', 'needs', 'framing', 'hypotheses', 'package', 'review'];
+export const STAGES = [
+  'intake', 'inquiry', 'survey', 'needs', 'framing', 'hypotheses', 'design', 'package', 'review', 'reentry',
+];
 
 // idea.txt's confidence vocabulary. Kept as a closed set so "we think" can never quietly
 // become "we know" between one session and the next.
@@ -29,6 +31,27 @@ export const HYPOTHESIS_STATUSES = ['open', 'testing', 'resolved'];
 // puts a build defect on the user's tab. Same split dod-lite makes between a failing artifact
 // and a grader that could not open it.
 export const OUTCOMES = ['confirmed', 'partly-confirmed', 'refuted', 'inconclusive', 'not-testable'];
+
+// ---------------------------------------------------------------- needs vocabulary
+//
+// `kind` is the whole point of the needs record, and it is about PROVENANCE, not importance.
+//
+// `stated` is the hard denominator: the user said it, in an interview, and there is an evidence
+// file to prove it. Those are the needs a package must account for, because the failure this
+// record exists to prevent is two hours of interview resolving to an MVP that addresses a
+// fraction of one thing the user asked for. The agent does not get to shrink that list.
+//
+// `observed` is behaviour the agent watched rather than heard; treat it as nearly as strong.
+// `inferred` and `prior-art` are the agent's own contribution — a workflow implication found by
+// walking the job through end to end, or a capability an existing tool has that the user never
+// thought to ask for. They are real, they belong in the design, and they NEVER gate a build:
+// gating on them would let the agent manufacture its own denominator, which is the exact defect
+// being fixed here.
+export const NEED_KINDS = ['stated', 'observed', 'inferred', 'prior-art'];
+
+export const NEED_IMPORTANCE = ['core', 'significant', 'peripheral'];
+
+export const NEED_STATUSES = ['open', 'covered', 'deferred', 'withdrawn'];
 
 /** Walks up for `.prospector/state.json`, the same way git resolves `.git`. */
 export function findRoot(startDir) {
@@ -48,6 +71,8 @@ export const paths = (root) => ({
   model: path.join(root, DIR, 'problem-model.md'),
   framings: path.join(root, DIR, 'framings.md'),
   hypotheses: path.join(root, DIR, 'hypotheses.json'),
+  needs: path.join(root, DIR, 'needs.json'),
+  blueprint: path.join(root, DIR, 'blueprint.md'),
   decisions: path.join(root, DIR, 'decisions.md'),
   evidence: path.join(root, DIR, 'evidence'),
   packages: path.join(root, DIR, 'packages'),
@@ -173,6 +198,172 @@ export function rankHypotheses(doc) {
     .sort((a, b) => b.score - a.score);
 }
 
+// ---------------------------------------------------------------- needs
+//
+// THE DENOMINATOR.
+//
+// Before this record existed, the only list of what the user wanted was `package.md` section 3,
+// written by the agent inside `/prospector:build` — in the same turn as the MVP, thirty seconds
+// before section 10 claimed to cover it. Section 10's rule ("every need in (3) appears in one
+// list or the other, no exceptions") was airtight and worthless, because (3) was whatever the
+// agent had just decided to build. A small (3) makes coverage complete by construction.
+//
+// So the denominator is accumulated during the interview, as things surface, and the build reads
+// it rather than writing it. `cutPackage` refuses while any `stated`/`core` need is still `open`.
+
+export const readNeeds = (root) => readJson(paths(root).needs, { schema: SCHEMA, needs: [] });
+
+/**
+ * Records one thing the user cannot currently do.
+ *
+ * `evidence` is REQUIRED for every kind except `inferred` and `prior-art` — the same discipline
+ * `addHypothesis` applies to a missing failure signal. A `stated` need with no evidence file
+ * behind it is the agent putting words in the user's mouth, and since `stated` needs are what
+ * gate a package cut, an invented one would let the agent write its own denominator after all.
+ */
+export async function addNeed(root, fields) {
+  if (!fields.statement) throw new Error('a need needs a statement');
+
+  const kind = fields.kind ?? 'stated';
+  if (!NEED_KINDS.includes(kind)) throw new Error(`kind must be one of ${NEED_KINDS.join(', ')}`);
+
+  const importance = fields.importance ?? 'significant';
+  if (!NEED_IMPORTANCE.includes(importance)) {
+    throw new Error(`importance must be one of ${NEED_IMPORTANCE.join(', ')}`);
+  }
+
+  const evidence = fields.evidence ?? [];
+  const agentAuthored = kind === 'inferred' || kind === 'prior-art';
+  if (!agentAuthored && evidence.length === 0) {
+    throw new Error(
+      `a "${kind}" need must cite the evidence it came from (--evidence E-NNN). If the user has not ` +
+      'actually said this yet, either go ask them, or record it as --kind inferred — which is honest ' +
+      'and still lands in the design, but deliberately does not gate a package cut.',
+    );
+  }
+
+  const doc = await readNeeds(root);
+  const state = await readState(root);
+  const n = {
+    id: nextId(doc.needs, 'N'),
+    statement: fields.statement,
+    verbatim: fields.verbatim ?? null,
+    evidence,
+    kind,
+    importance,
+    confidence: fields.confidence ?? 0.5,
+    status: 'open',
+    covered_by: null,
+    deferred_reason: null,
+    framing: fields.framing ?? state?.current_framing ?? null,
+    created_at: new Date().toISOString(),
+    origin_package: `v${state?.package_version ?? 0}`,
+  };
+  doc.needs.push(n);
+  await writeJson(paths(root).needs, doc);
+  return n;
+}
+
+/** Marks a need addressed by the package currently being cut (or by an explicit version). */
+export async function coverNeed(root, id, version) {
+  const doc = await readNeeds(root);
+  const state = await readState(root);
+  const n = doc.needs.find((x) => x.id === id);
+  if (!n) throw new Error(`no need ${id}`);
+  n.status = 'covered';
+  n.covered_by = version ?? `v${(state?.package_version ?? 0) + 1}`;
+  n.deferred_reason = null;
+  await writeJson(paths(root).needs, doc);
+  return n;
+}
+
+/**
+ * Deliberately NOT covered by the next package, with a reason the user can argue with.
+ *
+ * A deferral is a decision, not a disposal: the need stays in the file, keeps its importance, and
+ * `/prospector:reenter` reopens the deferred set when the next cycle starts. The reason is also
+ * copied into the frozen changelog at cut, so it is visible in the record forever — the same
+ * treatment `--unreviewed-reason` gets.
+ */
+export async function deferNeed(root, id, reason) {
+  if (!reason) {
+    throw new Error(
+      `deferring ${id} requires a reason (--reason). An unexplained deferral is indistinguishable ` +
+      'from having forgotten it, which is the thing this gate exists to catch.',
+    );
+  }
+  const doc = await readNeeds(root);
+  const n = doc.needs.find((x) => x.id === id);
+  if (!n) throw new Error(`no need ${id}`);
+  n.status = 'deferred';
+  n.deferred_reason = reason;
+  n.covered_by = null;
+  await writeJson(paths(root).needs, doc);
+  return n;
+}
+
+/** The user says it was never really a need. Only they can retire one; the agent may only defer. */
+export async function withdrawNeed(root, id, reason) {
+  const doc = await readNeeds(root);
+  const n = doc.needs.find((x) => x.id === id);
+  if (!n) throw new Error(`no need ${id}`);
+  n.status = 'withdrawn';
+  n.deferred_reason = reason ?? null;
+  await writeJson(paths(root).needs, doc);
+  return n;
+}
+
+/** Reopens a deferred need — what `/prospector:reenter` does at the start of a new cycle. */
+export async function reopenNeed(root, id) {
+  const doc = await readNeeds(root);
+  const n = doc.needs.find((x) => x.id === id);
+  if (!n) throw new Error(`no need ${id}`);
+  n.status = 'open';
+  n.covered_by = null;
+  await writeJson(paths(root).needs, doc);
+  return n;
+}
+
+const IMPORTANCE_WEIGHT = { core: 1, significant: 0.6, peripheral: 0.25 };
+const KIND_WEIGHT = { stated: 1, observed: 0.9, inferred: 0.6, 'prior-art': 0.5 };
+
+/**
+ * Ranks open needs by VALUE — deliberately a different question from `rankHypotheses`.
+ *
+ * `rankHypotheses` inverts confidence, because it answers "what should we find out next" and a
+ * 50/50 hypothesis teaches most. That is the right ranking while the problem is still unknown,
+ * and `/prospector:frame` says so outright.
+ *
+ * It is the WRONG ranking for "what should we build next" on a plugin that already works, which
+ * is exactly what `/prospector:reenter` is asked for. Inverted confidence would aim v3 at the
+ * least-understood thing on the page. So value ranks by importance and provenance, and confidence
+ * enters the normal way round: a need you are sure about is worth MORE, not less.
+ */
+export function rankNeeds(doc) {
+  return doc.needs
+    .filter((n) => n.status === 'open' || n.status === 'deferred')
+    .map((n) => {
+      const c = Math.min(Math.max(Number(n.confidence ?? 0.5), 0), 1);
+      const score = (IMPORTANCE_WEIGHT[n.importance] ?? 0.5) * (KIND_WEIGHT[n.kind] ?? 0.5) * c;
+      return { ...n, score: Number(score.toFixed(3)) };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * The needs a package cut must account for: said by the user, marked core, still open.
+ *
+ * Scoped to `core` on purpose. Requiring every `peripheral` need to be individually dispositioned
+ * before any package could be cut would turn the gate into paperwork, and a gate that is annoying
+ * enough gets routed around with `--defer-all` reasoning that means nothing. Core is the set the
+ * user would notice missing.
+ */
+export function blockingNeeds(doc) {
+  return doc.needs.filter(
+    (n) => (n.kind === 'stated' || n.kind === 'observed') && n.importance === 'core' && n.status === 'open',
+  );
+}
+
 // ---------------------------------------------------------------- evidence
 
 /**
@@ -283,16 +474,48 @@ export async function packageVerdict(root, v) {
 }
 
 /**
+ * The git sha of blueprint.md at the moment a package was cut.
+ *
+ * blueprint.md is LIVING — it is revised every cycle, unlike `packages/vN/` which freezes. So a
+ * frozen package that merely says "built from the blueprint" ages into a claim nobody can check.
+ * The sha makes "which design was v2 actually built against" answerable with `git show`.
+ *
+ * Best-effort: returns null for an uncommitted blueprint rather than blocking the cut. Refusing
+ * here would make the record's completeness depend on the user's commit timing, which is not a
+ * design property.
+ */
+async function blueprintSha(root) {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  try {
+    const { stdout } = await promisify(execFile)('git', ['rev-parse', `HEAD:${DIR}/blueprint.md`], { cwd: root });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Cuts package vN and returns its dir. Frozen once written.
  *
  * Package vN and MVP plugin vN are the same number by construction: Stage 6 of idea.txt cuts
  * a package and builds an MVP as one event, so they are one version, not two.
  *
- * Refuses to cut vN+1 while vN has never come back from the user. The packages are supposed to
- * be a monotonic EVIDENCE sequence — each one cut because use of the last one taught something.
- * Skip the middle and they become a sequence of guesses that merely happens to be numbered, and
- * the most likely reason to skip it is the worst one: the user disliked vN and the reflex is to
- * build more rather than to find out what they expected.
+ * TWO refusals guard a cut, and they check different things.
+ *
+ * 1. Has the LAST package come back? The packages are a monotonic EVIDENCE sequence — each one
+ *    cut because use of the last one taught something. Skip the middle and they become a
+ *    sequence of guesses that merely happens to be numbered, and the most likely reason to skip
+ *    it is the worst one: the user disliked vN and the reflex is to build more rather than to
+ *    find out what they expected.
+ *
+ * 2. Does the NEXT package account for everything the user asked for? This is the breadth gate.
+ *    It exists because an engagement once ran a two-hour interview and shipped an MVP covering a
+ *    fraction of one of the several things the user had named. Every `core` need they stated is
+ *    either covered or deferred with a written reason — never simply absent. Note the asymmetry
+ *    with (1): that one is overridable with `--unreviewed-reason`, this one is NOT. Deferring is
+ *    already the escape hatch, and it is a better one, because it names WHICH need is being
+ *    dropped instead of waving at the set.
  */
 export async function cutPackage(root, { changed, why, evidence, unresolved, confidence, unreviewed_reason }) {
   const state = await readState(root);
@@ -308,6 +531,25 @@ export async function cutPackage(root, { changed, why, evidence, unresolved, con
       );
     }
   }
+
+  const needsDoc = await readNeeds(root);
+  const blocking = blockingNeeds(needsDoc);
+  if (blocking.length > 0) {
+    const list = blocking.map((n) => `  ${n.id}  ${n.statement}`).join('\n');
+    throw new Error(
+      `${blocking.length} core need(s) the user stated are neither covered by this package nor deferred:\n\n` +
+      `${list}\n\n` +
+      'They asked for these. A package that silently omits them is the defect this gate exists for — two ' +
+      'hours of interview resolving to an MVP that addresses a fraction of one of the things they named. ' +
+      'For each: either build something for it and run `needs cover <id>`, or run ' +
+      '`needs defer <id> --reason "<why not this version>"`. A deferral is legitimate and lands in the ' +
+      'frozen changelog where the user can argue with it; an omission is invisible until they go looking ' +
+      'for the feature days later. There is no flag that skips this — deferring IS the override.',
+    );
+  }
+
+  const deferred = needsDoc.needs.filter((n) => n.status === 'deferred');
+  const sha = await blueprintSha(root);
   const v = prev + 1;
   const dir = path.join(paths(root).packages, `v${v}`);
   if (fsSync.existsSync(dir)) throw new Error(`packages/v${v} already exists — packages are frozen once cut`);
@@ -317,18 +559,30 @@ export async function cutPackage(root, { changed, why, evidence, unresolved, con
     path.join(dir, 'changelog.md'),
     `# v${v} — ${today()}\n\n` +
       `- **Framing:** ${state.current_framing ?? '(none)'}\n` +
+      `- **Blueprint:** ${sha ?? '(uncommitted at cut)'}\n` +
       `- **What changed:** ${changed ?? '(first package)'}\n` +
       `- **Why it changed:** ${why ?? '(initial)'}\n` +
       `- **Evidence that triggered it:** ${evidence ?? '(none yet)'}\n` +
       `- **Still unresolved:** ${unresolved ?? '(none recorded)'}\n` +
       `- **Confidence moved:** ${confidence ?? 'unchanged'}\n` +
-      (unreviewed_reason ? `- **Cut without reviewing v${prev}:** ${unreviewed_reason}\n` : ''),
+      (unreviewed_reason ? `- **Cut without reviewing v${prev}:** ${unreviewed_reason}\n` : '') +
+      // Deferrals go in the FROZEN record, not just in needs.json, because needs.json is living:
+      // a need deferred at v2 and covered at v3 would leave no trace that v2 ever skipped it.
+      // The user reading back "why didn't v2 do X" gets an answer that cannot be edited later.
+      (deferred.length > 0
+        ? `\n## Deliberately not covered by v${v}\n\n` +
+          deferred
+            .map((n) => `- **${n.id}** ${n.statement}\n  - **Why not this version:** ${n.deferred_reason}`)
+            .join('\n') +
+          '\n'
+        : ''),
     'utf8',
   );
 
   state.package_version = v;
+  state.blueprint_sha = sha;
   await writeState(root, state);
-  return { version: v, dir };
+  return { version: v, dir, blueprint_sha: sha, deferred: deferred.map((n) => n.id) };
 }
 
 export const packageDir = (root, v) => path.join(paths(root).packages, `v${v}`);
@@ -361,6 +615,11 @@ ${issue ?? '(not yet captured)'}
 ## Pain points
 
 ## Needs
+
+Enumerated in \`needs.json\`, not here — \`N-NNN\` ids, each citing the evidence it came from. That
+file is the denominator a package cut is checked against, so it has to be machine-readable. Use
+this section for the shape of the need set (clusters, tensions between needs, which ones trade off
+against each other) — the things a list of records cannot say.
 
 ## Desired outcomes
 
@@ -402,5 +661,6 @@ export async function scaffold(root, { issue } = {}) {
   }
   if (!fsSync.existsSync(p.model)) await fs.writeFile(p.model, MODEL_TEMPLATE(issue), 'utf8');
   if (!fsSync.existsSync(p.hypotheses)) await writeJson(p.hypotheses, { schema: SCHEMA, hypotheses: [] });
+  if (!fsSync.existsSync(p.needs)) await writeJson(p.needs, { schema: SCHEMA, needs: [] });
   return p;
 }

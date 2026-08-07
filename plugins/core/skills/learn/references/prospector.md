@@ -44,8 +44,10 @@ separate.
 ```
 <your dir>/                  git init'd by Prospector — not optional
   .prospector/               TRACKED IN GIT
-    state.json               stage, current framing, package version
+    state.json               stage, current framing, package version, blueprint sha
     problem-model.md         the living record; rewritten in place, meant to be read by you
+    needs.json               N-NNN — what you cannot do, each citing the evidence it came from
+    blueprint.md             LIVING — the whole-plugin design, revised every cycle
     framings.md              F1, F2 … append-only, each with the evidence that killed the last
     hypotheses.json          statement, assumption, validation, success/failure signals
     evidence/E-NNN.md        one observation per file, each with a status label
@@ -78,7 +80,26 @@ predict what they would adopt:
 
 Avoided: "Would you use X?" · "Do you like Y?" · "Would a feature that does Z be useful?"
 
-Every substantive answer gets recorded as an evidence entry with a status label attached.
+Every substantive answer gets recorded as an evidence entry with a status label attached. And
+whenever you name something you cannot currently do, that gets recorded separately as a **need**
+— `N-001`, `N-002` … each citing the evidence it came from. That list becomes the denominator
+every later version is checked against, which is why "I find it difficult to do A and to do B"
+is stored as *two* needs and not one.
+
+## Stage: survey (`/prospector:survey`)
+
+Checks whether the thing already exists, before any design work commits you to building it. It
+reads the community marketplace, Anthropic's demo plugins, whatever you already have registered,
+the open web — and asks you what you already tried, which is the best source of the five, because
+it is the only one that says *why* something failed.
+
+Three verdicts, and one of them ends the engagement: **"this already exists, install it, we're
+done."** That verdict is the point of the stage. A discovery instrument that cannot tell you not
+to build something is a build-justification machine, and one install beats three versions and a
+month. The other two are "exists but insufficient" — where the delta has to be named precisely,
+and the existing tool's features get mined for needs you never thought to ask for — and "nothing
+found", which is recorded as `unknown` rather than `confirmed`, because there is no plugin search
+API and no aggregator to have searched.
 
 ## Stage: frame (`/prospector:frame`)
 
@@ -104,34 +125,89 @@ Also the skill to re-run when new evidence invalidates the current framing. A re
 fork the packages — evidence and decisions carry over untouched, because they did not become
 wrong; the framing did.
 
+## Stage: design (`/prospector:design`)
+
+Writes `blueprint.md` — the design for the **whole** plugin, covering every need you actually
+stated, before anything is built.
+
+This is a separate stage for a structural reason. It used to live inside `build`: the same agent
+wrote the need list and the coverage claim in the same turn as the MVP, thirty seconds apart. The
+coverage rule was airtight — *every need appears as covered or uncovered* — and worthless, because
+a short need list makes coverage complete by construction. The result was an engagement that
+interviewed for two hours and shipped something addressing a fraction of one thing.
+
+So the design is written here, while there is nothing to be loyal to, and `build` reads it.
+
+The denominator is **what you said**, not what could be imagined — finite, on disk, and not
+subject to the agent's midnight inspiration. Beyond that it hunts for the needs you did *not*
+state, by narrating one real instance of your job end to end using only the designed plugin: every
+point where you have to drop out and do something by hand is a gap, and "what do you do the day it
+gets this wrong?" is a need whenever the answer is "I wouldn't be able to tell". Those enter as
+`inferred` — they shape the design and deliberately never gate a build, because a denominator the
+agent can write is not a constraint.
+
+Seven sections: the job end to end · need coverage map · edge cases and failure modes · workflow
+implications · prior art and the delta · the full surface · build order. It **enumerates, never
+specifies** — one paragraph per surface item, because an agent told to be complete will otherwise
+write a specification and spend the session on it.
+
+`blueprint.md` is living: revised every cycle, with git carrying its history, and each package
+records its sha at cut.
+
 ## Stage: build (`/prospector:build`)
 
-Cuts design package `vN` and builds the paired MVP plugin `vN` that tests the highest-value open
-hypothesis, then gets it installed so you can actually use it. **Package `vN` ↔ MVP plugin
-`vN`** — one event, one number, so "which version were you using?" always has an answer.
-Packages freeze at cut; later learning goes into `vN+1`.
+Cuts design package `vN` and builds the paired MVP plugin `vN`, then gets it installed so you can
+actually use it. **Package `vN` ↔ MVP plugin `vN`** — one event, one number, so "which version
+were you using?" always has an answer. Packages freeze at cut; later learning goes into `vN+1`.
 
-Narrow on purpose. The MVP is not a small version of the product; it is the cheapest object that
-makes one hypothesis survive or die in real use.
+**Narrow in depth, never in breadth.** Every core need you actually stated is either touched by
+`vN` or deferred with a reason you can read — and the CLI *refuses to cut a package* otherwise,
+with no flag that skips it. Deferring is the override, and a better one, because it names which
+need is being dropped instead of waving at the set; the reason lands in the frozen changelog where
+you can argue with it forever.
+
+What gets cut is polish, generality, configurability, and edge-case handling — the hard half of
+each need before any need entirely. A rough version of the whole job, not a finished version of a
+sixth of it. Breadth is what makes the interview honest; depth is what makes it cheap.
 
 ## Stage: review (`/prospector:review`)
 
 Turns your real use of an MVP into evidence. Interviews for behaviour, not opinion — what you
 actually did, what you stopped doing, what you went back to doing by hand. **The parts you
 quietly abandoned are the highest-signal data in the entire method**, because nobody reports
-abandonment spontaneously. Resolves or refutes the hypothesis the MVP tested, updates the living
-problem model, and decides the next move: another iteration, a reframe, or handoff.
+abandonment spontaneously. Resolves or refutes the hypothesis the MVP tested, reconciles the needs
+list against what use revealed, updates the living problem model, and decides the next move:
+another iteration, a reframe, or handoff.
 
 ## Stage: handoff (`/prospector:handoff`)
 
 Writes `.ab-bench/<mandate>/mandate.md` and `quality-rubric.md` directly from the design package,
-so Optimizer confirms rather than re-interviewing you on everything you just established. See
-`chain.md` for how the receiving side treats them.
+so Optimizer confirms rather than re-interviewing you on everything you just established. It reads
+the still-deferred needs out loud first — they are about to become invisible, because the Optimizer
+measures how well the plugin does what it does and cannot notice a thing it was never built to do.
+See `chain.md` for how the receiving side treats them.
+
+## Stage: reenter (`/prospector:reenter`)
+
+The return leg, after an Optimizer cycle. Ingests the A/B evidence, diffs what actually shipped
+against the blueprint's build order, interviews you on real use, re-runs the survey (the market
+moved, and you finally know the right words to search with), revises the blueprint, and ranks the
+next slice.
+
+**Here the ranking flips.** `hypothesis rank` inverts confidence because it answers *what should
+we find out next* — right while the problem is unknown, wrong on a plugin that already works, where
+it would aim v3 at the least-understood thing on the page. `needs rank` orders by value:
+importance × provenance × confidence, uninverted.
+
+It reads `analysis/fix-list.md` but never executes it — that is yours to apply by hand in the
+plugin's own repo. It classifies: "does the wrong thing" is a discovery finding, "does the right
+thing slowly" is handed back untouched.
 
 ## Stage: status (`/prospector:status`)
 
-Read-only. Stage, current framing, packages cut, open vs resolved hypotheses ranked by expected
-learning, evidence count, and whether a handoff has been written.
+Read-only. Stage, current framing, **needs coverage and what was deliberately dropped**, packages
+cut, open vs resolved hypotheses ranked by expected learning, evidence count, and whether a handoff
+or an Optimizer cycle has happened.
 
 ## The rules that make it work
 
@@ -143,7 +219,16 @@ learning, evidence count, and whether a handoff has been written.
 - **Hypotheses rank by expected learning, not likelihood of success.** Confidence enters
   *inverted*: a 50/50 hypothesis teaches the most, a 90% one teaches almost nothing. That is the
   opposite of picking the thing most likely to succeed, and it is deliberate — the point is to
-  find out, not to be right.
+  find out, not to be right. **Needs rank the other way**, by value, uninverted — because "what
+  should we find out next" and "what should we build next" are different questions and answering
+  the second with the first is how a working plugin gets a version aimed at its own blind spot.
+- **The agent never authors its own denominator.** A `stated` need must cite the evidence file it
+  came from; the CLI refuses one that does not. Needs the agent supplied (`inferred`, `prior-art`)
+  are recorded honestly and never gate a build. Everything else in the method rests on this.
 - **Converge late.** Breadth is cheap at this stage and expensive later.
-- **Endless discovery is a failure mode.** So is building on a framing nobody challenged. Each
-  checkpoint ends with an explicit decision about which of the two risks is currently larger.
+- **Endless discovery is a failure mode.** So is building on a framing nobody challenged. So is
+  building what already exists. Each checkpoint ends with an explicit decision about which risk is
+  currently larger.
+- **It is a loop, not a pipeline.** `start → survey → frame → design → build → review` cycles on
+  itself, and after a handoff and an Optimizer run, `reenter → design → build` picks it up again
+  with A/B evidence in hand. Prospector is not only for greenfield ideation.

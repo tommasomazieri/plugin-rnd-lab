@@ -96,11 +96,28 @@ Then update `problem-model.md` in place. Do not restart the engagement over one 
 `/prospector:frame` with `--killed-by` exists for genuine framing invalidation, and everything
 short of that is an iteration.
 
+### Then reconcile the needs list
+
+Real use is the only thing that can tell you the list was wrong. Three moves, all of them
+requiring the user's word rather than your judgement:
+
+- a need they now say was never really one → `needs withdraw --id N-00N --reason "<their words>"`;
+- a need they named for the first time while describing the use → `evidence`, then
+  `needs add --kind stated --evidence E-NNN`;
+- a need whose importance moved — usually a `peripheral` one that turned out to block their week.
+  Say so out loud; it changes what the next version must cover.
+
+A deferred need they did **not** complain about is information too, and it is the cheap kind: the
+deferral was right, and the reason in the changelog is worth keeping for the next one.
+
 ## 5. Decide the next move, explicitly
 
 State which and why:
 
-- **iterate** → `/prospector:build` for vN+1 against the next-ranked hypothesis;
+- **iterate** → `/prospector:design` to fold what you learned into the blueprint, then
+  `/prospector:build` for vN+1. Go through the design even when the change looks obvious — the
+  blueprint is what the breadth gate is measured against, and an MVP that outruns its design is
+  how the coverage list quietly becomes fiction again;
 - **rebuild** → `/prospector:build` for vN+1 against the **same** hypothesis, when §3 resolved
   `not-testable`. The question is untouched; what failed was the artifact carrying it. Never
   reframe off a `not-testable` — you have no evidence to reframe from;
@@ -113,6 +130,11 @@ State which and why:
 The handoff test is specific: can you state a supported problem, prioritised outcomes,
 measurable success criteria, constraints, scope, explicit non-goals, and the known unresolved
 risks? If any of those is still hand-waving, you are not done finding out.
+
+**After a handoff and an Optimizer cycle, the entry point is `/prospector:reenter`, not this
+skill.** This one turns one MVP's use into evidence; that one re-opens the whole question with the
+A/B results, the shipped surface, and a fresh prior-art search in hand. `detect` reports
+`post-optimizer` when that is where you are.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" decision "<cwd>" \

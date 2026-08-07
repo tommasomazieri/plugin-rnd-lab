@@ -141,6 +141,31 @@ to strengthen or kill it.
 Update `.prospector/problem-model.md` in place as understanding changes — rewrite sections,
 don't append. It is the single source of truth, and it is meant to be read by the user.
 
+### And when they name something they cannot do, record it as a NEED
+
+Evidence is what they said. A need is a thing they cannot currently do, extracted from it. Record
+one the moment it surfaces — not in a batch at the end, and never at build time:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" needs add "<cwd>" \
+    --statement "<what they cannot currently do>" \
+    --verbatim "<their words>" \
+    --evidence E-004 \
+    --kind stated --importance <core|significant|peripheral>
+```
+
+`--evidence` is **required** for a `stated` need and the CLI refuses without it. That is the point:
+this list is the denominator a package cut is checked against, so the agent may not write its own.
+If you believe something is a need but they have not said it, either ask, or record it
+`--kind inferred` — honest, useful, and deliberately non-gating.
+
+**Split compound complaints.** "I find it hard to do A and to do B" is two needs, not one. Merged
+into one record, an MVP covering a fraction of A satisfies the gate and the user gets the exact
+outcome this whole mechanism exists to prevent.
+
+`--importance core` means *they would notice its absence*. Be honest rather than generous: marking
+everything core makes the gate noise, and a gate that is noise gets deferred past.
+
 ## 4. Know when to stop asking
 
 ### The intake is a checklist, not a preamble
@@ -164,7 +189,8 @@ None of these is optional, and none is answerable by inference:
    error survives all the way to a shipped MVP before anyone notices.
 2. **What already exists here, and what is it worth?** Assets they named, assets in the repo,
    assets they abandoned. Which are load-bearing, which are dead. Ask; never go read a thing
-   they described as dead, and never infer status from the filesystem.
+   they described as dead, and never infer status from the filesystem. This is about *their*
+   materials — what exists in the wider world is `/prospector:survey`'s job, and it runs next.
 3. **What does a working week actually look like?** Session length, how many, over how long,
    where they stop. Every later decision about cost and cadence rests on this, and inventing it
    is how an MVP gets validated against a workflow nobody has.
@@ -179,14 +205,26 @@ State how many questions you have asked and what remains unasked from the checkl
 interview has enough" is a claim, and it is yours; make it out loud where they can overrule it,
 because they are the only one who knows what you never asked about.
 
+**Read the needs list back to them by name** and ask what is missing. This is the cheapest moment
+in the whole engagement to catch a dropped need, and the list is short enough to read aloud:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" needs list "<cwd>"
+```
+
 Then decide explicitly, and say which:
 
 - keep interviewing (a decision-relevant question is still open);
-- move to competing framings → `/prospector:frame`;
-- go straight to a narrow MVP because the cheapest way to learn the next thing is to
-  let them use something → `/prospector:build`.
+- check whether this already exists → `/prospector:survey` — **the normal next step**, and the
+  cheapest possible outcome is that the answer is yes;
+- move to competing framings → `/prospector:frame`.
 
-Endless discovery is a failure mode. So is building on a framing nobody challenged.
+Endless discovery is a failure mode. So is building on a framing nobody challenged, and so is
+building something that already exists.
+
+Note that `/prospector:build` is **no longer reachable from here**. A design comes first, from
+`/prospector:design`, and it comes first because an agent that designs and builds in one turn
+writes a design its build happens to satisfy.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" stage "<cwd>" --to inquiry

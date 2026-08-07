@@ -27,10 +27,19 @@ Refuse to proceed unless all of these exist, and say which one is missing if not
 - known constraints;
 - clear scope and **explicit non-goals**;
 - a chosen solution direction;
-- the known unresolved risks, stated rather than buried.
+- the known unresolved risks, stated rather than buried;
+- a `blueprint.md`, and every core stated need either covered by a shipped version or deferred
+  with a reason.
 
 At least one hypothesis should have been tested through real MVP use and resolved. An engagement
 with everything still `open` has produced a plan, not a validated direction.
+
+**Say the still-deferred needs out loud before handing off.** They are about to become invisible:
+the Optimizer measures how well the plugin does what it does, and has no way to notice a thing it
+was never built to do. A need deferred at v1 and forgotten at handoff is a need that gets
+efficiently executed out of existence — and the user, three months and eight A/B runs later, will
+ask what happened to it. Read the list, and let them promote any of it into scope before the
+mandate freezes.
 
 ## 1. Why this writes mandate.md itself
 

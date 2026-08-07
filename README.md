@@ -13,10 +13,18 @@ Two instruments, operating at different stages (plus `core`, which teaches them 
 | evidence | your real use of narrow MVPs | paired A/B runs across five pillars |
 | output | a validated direction + a written `mandate.md` | an evidence-backed improvement report |
 
-> Prospect first. Then refine.
+> Prospect first. Then refine. Then prospect again.
 
-They chain: Prospector hands the Optimizer a pre-written mandate, so `/optimizer:understand`
-confirms rather than re-interviewing you on everything you just established. Either works alone.
+They chain, and the chain is a **loop**: Prospector hands the Optimizer a pre-written mandate, so
+`/optimizer:understand` confirms rather than re-interviewing you on everything you just
+established — and when the Optimizer's evidence is in, `/prospector:reenter` picks it back up,
+reassesses what is still missing, and scopes the next version. Either works alone.
+
+```
+prospector: start → survey → frame → design → build → review → handoff
+                                ↑                                 ↓
+                                └───── reenter ←── optimizer: init → plan → fire → analyze
+```
 
 A third plugin, `dod-lite`, is the Optimizer's arm-side **audit instrument**. It is registered so
 it installs alongside, but it is internal — you never invoke it. See "DoD tracking" below.
@@ -29,12 +37,22 @@ real testing harness with a learning curve. Windows only for now (see Prerequisi
 
 You have a problem, not a spec. Prospector refuses to take your first framing at face value —
 "I need a tool that manages my tasks" is a *solution*, and the problem behind it is still unknown.
-It interviews you for concrete past behaviour rather than opinions, keeps competing problem
-framings alive instead of collapsing to the first one, labels every claim with its actual
-confidence (`confirmed` … `assumption`), and builds deliberately narrow MVP plugins that you
-install and use in your own real projects. Your use of those MVPs — especially the parts you
-quietly abandoned — is the evidence. Runs in place, in the directory the future plugin will live
-in. See `plugins/prospector/README.md`.
+It interviews you for concrete past behaviour rather than opinions, checks whether the thing
+already exists before designing anything, keeps competing problem framings alive instead of
+collapsing to the first one, labels every claim with its actual confidence (`confirmed` …
+`assumption`), designs the **whole** plugin before building any of it, and then ships MVPs that
+are shallow on purpose but never narrow: every core need you actually stated is either covered or
+deferred with a reason you can read. You install those MVPs and use them in your own real
+projects, and your use of them — especially the parts you quietly abandoned — is the evidence.
+Runs in place, in the directory the future plugin will live in. See
+`plugins/prospector/README.md`.
+
+Two mechanisms carry most of the weight. **The need list is the denominator, and the agent that
+builds does not author it**: needs are recorded during the interview, each citing the evidence it
+came from, and `/prospector:build` cannot cut a package leaving a core one unaccounted for. **The
+design is a separate stage from the build**, because an agent that does both in one turn writes a
+design its build happens to satisfy — which is how two hours of interview used to become an MVP
+addressing a fraction of one thing you asked for.
 
 ## What's Optimizer, in one paragraph
 
@@ -204,13 +222,19 @@ two unreconciled writers is a bug, not a feature.
 | `.dod/checks/*` | `optimizer:plan` | dod-lite's Stop hook | arms can neither read nor write these |
 | `.dod/sessions/*.json` | `optimizer` seeds, dod-lite updates `state`/`history` | `analyze` | the sole shared-state exception, and the reason `.dod/` is denied to arms in both directions |
 | `runs/run-NNN/analysis/report.md` | `optimizer:analyze` | you, `paper` | the evidentiary record |
-| `runs/run-NNN/analysis/fix-list.md` | `optimizer:analyze` §5b | the plugin-manager session | the work order — different reader, on purpose |
+| `runs/run-NNN/analysis/fix-list.md` | `optimizer:analyze` §5b | the plugin-manager session (you, by hand, in the plugin's repo) | the work order — different reader, on purpose. `prospector:reenter` reads it to *classify* items, never to execute them |
 | `lab/objective.json` | `optimizer:plan` step 0b | `plan`, `analyze`, `paper` | one priority pillar + guards |
 | `lab/hypotheses.json` | `optimizer:analyze` §4d (add), `plan` (resolve) | `plan` step 0b ranking | |
 | `lab/regressions/points.json` | `optimizer:analyze` | `plan` step 0b coverage, `paper` | one point per run, `kind: frozen` vs `run` |
-| `.prospector/**` | prospector skills only | `prospector:handoff` | tracked in git — the record is part of the deliverable |
+| `.prospector/needs.json` | `prospector:start`/`frame`/`survey`/`design`/`review`/`reenter` | `design`, `build`, `status`, and the `cutPackage` gate | the denominator. A `stated` need must cite its evidence; `build` may not author it |
+| `.prospector/blueprint.md` | `prospector:design` only | `build`, `reenter` | **living**, not frozen — revised each cycle; each package records its git sha at cut |
+| `.prospector/packages/vN/**` | `prospector:build` | you, `handoff` | frozen at cut, deferral reasons included |
+| `.prospector/**` (rest) | prospector skills only | `prospector:handoff` | tracked in git — the record is part of the deliverable |
 
 `core` writes nothing. `dod-lite` writes only `state`/`history` inside `.dod/sessions/*.json`.
+`prospector:reenter` **reads** the Optimizer's testenv (via `.ab-bench/state.json`'s
+`testenv_root`) and writes nothing there — the mirror of `handoff` writing `mandate.md` and
+nothing else.
 
 ### Settled — do not re-open
 
@@ -231,6 +255,18 @@ and both arms get an identical check list. A check that shells out to the plugin
 where that plugin also ships a Stop hook blocking until the same validator passes, can only ever
 report `pass`. Everything that lives in the plugin must function autonomously, as if no DoDs
 existed.
+
+**Prospector's design stage is separate from its build stage, permanently.** They were one skill,
+and the coverage rule it enforced — *every need is listed as covered or uncovered* — was airtight
+and worthless, because the same agent wrote the need list thirty seconds earlier, in the same turn
+as the MVP. A short list makes coverage complete by construction. The denominator now lives in
+`needs.json`, is accumulated during the interview, and the building agent reads it rather than
+writing it. Do not merge these stages back together to save a turn.
+
+**The MVP is narrow in depth, never in breadth**, and `cutPackage` enforces it with no override
+flag — deferring a named need with a written reason *is* the override, and it lands in the frozen
+changelog. An earlier ceiling ("only enough of the job to expose the chosen hypothesis") was right
+about depth and disastrous about breadth.
 
 ## Adding another plugin to this marketplace
 

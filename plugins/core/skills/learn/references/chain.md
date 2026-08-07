@@ -39,6 +39,45 @@ every past run was measured against.
 seven-category interview. Prospector with no handoff is still a complete method for finding out
 what to build.
 
+## Optimizer → Prospector — the loop closes
+
+The chain is a **loop**, not a one-way pipeline:
+
+```
+prospector: start → survey → frame → design → build → review → handoff
+                                 ↑                                 ↓
+                                 │                          optimizer: init →
+                                 │                          plan → fire → analyze
+                                 │                                 ↓
+                                 └────────── reenter ──────────────┘
+```
+
+`/prospector:reenter` reads the same shared directory in the other direction. `.ab-bench/state.json`
+names `testenv_root`; every `runs/*/analysis/report.md` under it, plus `lab/findings.md`,
+`lab/hypotheses.json`, and `ledger.md`, is evidence about how the shipped plugin actually behaved.
+`prospector-cli detect` reports **`post-optimizer`** once a blueprint exists and at least one run
+has been analysed — both conditions, because a handoff with no analysed run has produced nothing
+new to re-enter on.
+
+Re-entry ingests that evidence, diffs the shipped surface against the blueprint's build order,
+interviews on real use, re-runs the prior-art survey, revises the blueprint, and ranks the next
+slice by **value** rather than by expected learning.
+
+`analysis/fix-list.md` is deliberately **not** re-entry's to execute. Its reader is the operator,
+by hand, in the plugin's own repo — that is by design, not an oversight. Re-entry reads it only to
+classify: an item meaning *"does the wrong thing"* is a discovery finding and comes back into the
+needs list; *"does the right thing slowly"* is named and left alone. Folding efficiency fixes into
+`vN+1` makes the user's reaction to that version unattributable between "new capability" and "same
+capability, faster".
+
+The Optimizer holds up its own half at `/optimizer:analyze` §7b. When the finding is that the
+plugin is aimed at the wrong job rather than executing it badly — a fix-list full of "the user had
+to redo this", a mandate that no longer describes actual use, runs that keep confirming hypotheses
+while the plugin gets no more useful — it says so and names `/prospector:reenter`. It still never
+redefines the problem itself; it is simply the instrument most likely to notice that the problem
+needs redefining, and silence there is not neutrality. (If Prospector was never used on that
+plugin, the same signal means `/optimizer:understand` needs re-running.)
+
 ## Why the handoff is files, not code
 
 There is no supported way for one plugin to read another's install directory — a `dependencies`
@@ -72,17 +111,23 @@ and test toward the same output and mask the difference being measured. Two regr
 Source, verbatim: `plugins/optimizer/docs/dod-contract.md` and the comment block in
 `plugins/optimizer/skills/fire/scripts/launch-pair.mjs`.
 
-## Two things both called "hypothesis"
+## Three ranked lists, three different questions
 
-Worth flagging when a user moves between the plugins, because they are different objects with
-different ranking rules:
+Worth flagging when a user moves between the plugins and the stages, because these are different
+objects and the rankings deliberately disagree:
 
-| | Prospector hypothesis | Optimizer hypothesis |
-|---|---|---|
-| lives in | `.prospector/hypotheses.json` | `lab/hypotheses.json` in the testenv |
-| asks | is this the real problem? | will this change move a pillar? |
-| ranked by | **expected learning** — confidence *inverted*, 50/50 ranks highest | magnitude × confidence ÷ cost |
-| resolved by | the user's real use of an MVP | a paired A/B run |
+| | Prospector hypothesis | Prospector need | Optimizer hypothesis |
+|---|---|---|---|
+| lives in | `.prospector/hypotheses.json` | `.prospector/needs.json` | `lab/hypotheses.json` in the testenv |
+| asks | is this the real problem? | what can't the user do? | will this change move a pillar? |
+| answers | what to **find out** next | what to **build** next | what to **try** next |
+| ranked by | **expected learning** — confidence *inverted*, 50/50 ranks highest | **value** — importance × provenance × confidence, uninverted | magnitude × confidence ÷ cost |
+| resolved by | the user's real use of an MVP | being covered by a version, or deferred with a reason | a paired A/B run |
+
+The inversion is the thing to get right. Ranking builds by expected learning aims each version at
+the least-understood item on the page, which is usually the furthest from anything the user would
+run daily — correct while the problem is unknown, actively wrong once a working plugin exists.
+That is why `/prospector:reenter` uses `needs rank` and not `hypothesis rank`.
 
 ## Install order
 
