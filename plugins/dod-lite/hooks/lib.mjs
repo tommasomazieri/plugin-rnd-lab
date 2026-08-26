@@ -15,13 +15,23 @@ export const CONFIG_FILE = 'config.json';
 // human is the gate now — they end a session when they choose and report the outcome at
 // /optimizer:analyze. See dod-check.mjs's header for why asking cost more than it bought.
 
+// Every entry is overridable per-experiment via .dod/config.json "runners".
+//
+// Two of these have to differ by platform. PowerShell ships as `powershell.exe` on
+// Windows and as `pwsh` everywhere else, and -ExecutionPolicy is a Windows-only
+// parameter that makes pwsh reject the invocation outright on macOS and Linux. `python`
+// is the Windows spelling; on macOS and most current Linux distros the bare name is
+// either absent or a stub that tells you to install something, and `python3` is the one
+// that runs.
+const IS_WINDOWS = process.platform === 'win32';
+
 export const DEFAULT_RUNNERS = {
   '.mjs': 'node',
   '.js': 'node',
   '.cjs': 'node',
   '.sh': 'bash',
-  '.ps1': 'powershell -NoProfile -ExecutionPolicy Bypass -File',
-  '.py': 'python',
+  '.ps1': IS_WINDOWS ? 'powershell -NoProfile -ExecutionPolicy Bypass -File' : 'pwsh -NoProfile -File',
+  '.py': IS_WINDOWS ? 'python' : 'python3',
   '.rb': 'ruby',
 };
 

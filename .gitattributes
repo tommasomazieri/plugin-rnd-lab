@@ -1,0 +1,22 @@
+# This repo is authored on Windows and cloned on Windows, macOS and Linux. Without this,
+# whether a file arrives with CRLF depends on each contributor's core.autocrlf, and a
+# CRLF shebang line is a file the kernel refuses to execute — with an error naming an
+# interpreter that plainly exists ("/bin/sh^M: bad interpreter").
+#
+# Normalize text in the repo, and pin LF on checkout for everything that is read by a
+# shell, a shebang, or a JSON/YAML parser.
+* text=auto
+
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+
+# PowerShell is the one dialect that wants CRLF; the generated arm launcher writes its own
+# regardless, this only covers any .ps1 committed to the repo.
+*.ps1   text eol=crlf

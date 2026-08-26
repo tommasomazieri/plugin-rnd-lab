@@ -257,5 +257,7 @@ State these plainly if the user seems headed toward breaking one:
   leaks in unevenly.
 - **DoD tracking is mandatory** — the trimmed engine is injected into both arms on every run
   automatically. There is no "forgot to enable dod-lite" failure mode.
-- **Windows only, for now** — fire spawns detached `cmd.exe` terminals and links each arm's
-  `.dod/` via a Windows directory junction.
+- **Windows, macOS and Linux** — fire opens each arm in its own titled terminal window using
+  whatever the platform provides (Windows Terminal, Terminal.app/iTerm2, or the first Linux
+  emulator found on `PATH`; `OPTIMIZER_TERMINAL` overrides). Where none can be opened the run is
+  staged and fire prints the two commands to start the arms by hand.

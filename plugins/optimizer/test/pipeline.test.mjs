@@ -21,6 +21,10 @@ import {
   nodeExpectFail,
   readJson,
 } from './helpers.mjs';
+import { launchScriptExt } from '../skills/fire/scripts/terminal.mjs';
+
+const LAUNCH_EXT = launchScriptExt();
+const IS_WINDOWS = process.platform === 'win32';
 
 test.after(cleanupAll);
 
@@ -203,17 +207,20 @@ test('schema 2: env: delivery exports a path into the arm launcher', () => {
   node(SCRIPTS.resolveBaseline, [configRoot, testenvRoot, runDir]);
   node(SCRIPTS.launchPair, [configRoot, testenvRoot, '--no-spawn']);
 
-  const script = fs.readFileSync(path.join(runDir, '.launch', 'control.launch.ps1'), 'utf8');
-  assert.match(script, /^\$env:LIB_ROOT = '.+'$/m);
+  const script = fs.readFileSync(path.join(runDir, '.launch', `control.launch${LAUNCH_EXT}`), 'utf8');
+  assert.match(script, IS_WINDOWS ? /^\$env:LIB_ROOT = '.+'$/m : /^export LIB_ROOT='.+'$/m);
   const manifest = readJson(path.join(runDir, 'manifest.json'));
   assert.ok(manifest.arms.control.env_vars.LIB_ROOT);
   assert.ok(!fs.existsSync(path.join(runDir, 'control', 'vendor')), 'env delivery copies nothing');
 });
 
-test('the arm launcher is a PowerShell script that splats claude args', () => {
-  // Regression guard. The launcher used to emit a .cmd batch run under `cmd /k`, which
-  // put both arms in a legacy conhost console with no colour at all — in a benchmark
-  // whose deliverable is visual and whose operator reads two windows side by side.
+test('the arm launcher preserves argv and keeps colour in the host dialect', () => {
+  // Regression guard, in two directions. The launcher used to emit a .cmd batch run under
+  // `cmd /k`, which put both arms in a legacy conhost console with no colour at all — in a
+  // benchmark whose deliverable is visual and whose operator reads two windows side by side.
+  // It was then PowerShell-only, which made the whole harness Windows-only. What every
+  // dialect has to keep is the same short list: argv preserved element by element, cwd set,
+  // session persistence forced, colour forced back on.
   const pluginRepo = makePluginRepo();
   const { configRoot, testenvRoot } = makeEnvPair(
     baseEnv({ artifacts: { demo: { repo: pluginRepo, deliver: 'plugin-dir' } } }),
@@ -223,24 +230,41 @@ test('the arm launcher is a PowerShell script that splats claude args', () => {
   node(SCRIPTS.launchPair, [configRoot, testenvRoot, '--no-spawn']);
 
   for (const arm of ['control', 'test']) {
-    const p = path.join(runDir, '.launch', `${arm}.launch.ps1`);
-    assert.ok(fs.existsSync(p), `${arm} launcher should be a .ps1`);
+    const p = path.join(runDir, '.launch', `${arm}.launch${LAUNCH_EXT}`);
+    assert.ok(fs.existsSync(p), `${arm} launcher should be a ${LAUNCH_EXT}`);
     assert.ok(!fs.existsSync(path.join(runDir, '.launch', `${arm}.launch.cmd`)),
       `${arm} must not fall back to a .cmd batch`);
 
     const script = fs.readFileSync(p, 'utf8');
-    // Arguments go through an array + splat, never an interpolated command line: paths
-    // carry spaces and the opening prompt carries punctuation.
-    assert.match(script, /^\$claudeArgs = @\(.+\)$/m);
-    assert.match(script, /^& claude @claudeArgs$/m);
-    assert.match(script, /^Set-Location -LiteralPath '.+'$/m);
-    // Session persistence override must survive the shell change.
-    assert.match(script, /^\$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"$/m);
-    // UTF-8, or box-drawing in the arm's own TUI comes out as mojibake.
-    assert.match(script, /OutputEncoding/);
-    // No cmd-isms left behind.
-    assert.ok(!/^set [A-Z_]+=/m.test(script), 'no cmd `set VAR=` lines');
-    assert.ok(!/^@echo off$/m.test(script), 'no cmd batch header');
+
+    if (IS_WINDOWS) {
+      // Arguments go through an array + splat, never an interpolated command line: paths
+      // carry spaces and the opening prompt carries punctuation.
+      assert.match(script, /^\$claudeArgs = @\(.+\)$/m);
+      assert.match(script, /^& claude @claudeArgs$/m);
+      assert.match(script, /^Set-Location -LiteralPath '.+'$/m);
+      assert.match(script, /^\$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"$/m);
+      // UTF-8, or box-drawing in the arm's own TUI comes out as mojibake.
+      assert.match(script, /OutputEncoding/);
+      // No cmd-isms left behind.
+      assert.ok(!/^set [A-Z_]+=/m.test(script), 'no cmd `set VAR=` lines');
+      assert.ok(!/^@echo off$/m.test(script), 'no cmd batch header');
+    } else {
+      // `set --` + "$@" is sh's splat: one array element, one argv entry, whatever is in it.
+      assert.match(script, /^#!\/bin\/sh$/m);
+      assert.match(script, /^set -- .+$/m);
+      assert.match(script, /^claude "\$@"$/m);
+      assert.match(script, /^cd '.+' \|\| exit 1$/m);
+      assert.match(script, /^export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1$/m);
+      // No PowerShell left behind.
+      assert.ok(!/\$env:/.test(script), 'no PowerShell env syntax');
+      assert.ok(!/Set-Location/.test(script), 'no PowerShell cmdlets');
+    }
+
+    // Both dialects: the parent session's NO_COLOR leaks all the way down to the arm's
+    // own TUI, and scrubbing it is what keeps the two windows readable side by side.
+    assert.match(script, /NO_COLOR/);
+    assert.match(script, /FORCE_COLOR/);
   }
 });
 

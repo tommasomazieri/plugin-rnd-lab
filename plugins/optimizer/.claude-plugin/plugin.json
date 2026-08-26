@@ -2,7 +2,7 @@
   "name": "optimizer",
   "displayName": "Optimizer",
   "description": "A/B testing harness for Claude Code plugins. Creates experiment environments, pins every declared artifact per arm to an immutable snapshot, launches paired control/test sessions with everything-else-equal configs, and produces comparative analysis (deterministic metrics + rubric-scored quality + LLM contextualization) across five pillars — quality, input tokens, output tokens, turns, autonomy. Accumulates run-over-run into a hypothesis ledger, a regression series, and a generated write-up.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": {
     "name": "Tommaso Mazieri"
   },

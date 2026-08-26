@@ -14,8 +14,8 @@ own repo, which holds a gitignored `.ab-bench/` folder (mandate/env identity: `e
 `mandate.md` — never touched by an arm). Everything an arm session or `launch-pair.mjs` actually
 materializes on disk — `seed/`, `.dod/`, `baselines/`, `runs/` — stays in the paired **testenv**
 folder under `${user_config.experiments_root}`, auto-derived from the plugin repo's folder name
-(no experiment name to invent). `.dod/`'s own schema and the junction requirement below are
-UNCHANGED by this — only WHERE the folder that gets junction-linked lives moved (from a
+(no experiment name to invent). `.dod/`'s own schema and the link requirement below are
+UNCHANGED by this — only WHERE the folder that gets linked lives moved (from a
 user-named experiment folder to an auto-derived testenv folder). See `lib/state.mjs` for the
 shared path-resolution helpers every skill/script uses.
 
@@ -175,7 +175,7 @@ ${user_config.experiments_root}/<plugin-folder-name>/mandate-N/env-M/    ← the
                                location, but makes a stray copy of manifest.json self-describing),
                                PLUS arms.<arm>.artifacts[] and env_vars.
     control/  test/         ← arm workspaces; EACH gets .dod as a directory JUNCTION to THIS
-                               testenv's own .dod/ (see "Why a junction" below — still required).
+                               testenv's own .dod/ (see "Why the `.dod` link is still required" below).
                                An arm has NO write channel into DoD state: settings deny
                                Edit/Write/MultiEdit under /.dod/**, and nothing else exists for
                                it to write. It is observed, never consulted.
@@ -233,18 +233,24 @@ running the artifact's own tooling, it is not a DoD criterion. See `/optimizer:p
 `launch-pair.mjs` records both violations in `.launch/parity-report.json`
 (`dod_checks_asymmetric`, `dod_checks_non_generic`) and `/optimizer:fire` blocks on either.
 
-## Why a junction is still required
+## Why the `.dod` link is still required
 
 dod-lite's `Stop` hook (`dod-check.mjs`) is unforked/untouched code and still resolves `.dod` as
 `path.join(cwd, '.dod')` with **no upward directory search**. An arm session running with cwd =
 `runs/run-NNN/control/` would get its OWN private `.dod/` inside that workspace if left alone —
 breaking the shared/recycled-across-runs design entirely.
 
-Fix (entirely on optimizer's side): `launch-pair.mjs` creates `runs/run-NNN/<arm>/.dod` as a Windows
-directory junction (`fs.symlinkSync(target, link, 'junction')`, no admin rights required) pointing
-at `<testenvRoot>/.dod`. Junctions are transparent at the filesystem driver level — the Stop hook,
-running with cwd = the arm workspace, reads/writes/executes through the junction exactly as if
-`.dod/` were physically there, including running check scripts with the arm's own cwd.
+Fix (entirely on optimizer's side): `launch-pair.mjs` links `runs/run-NNN/<arm>/.dod` at
+`<testenvRoot>/.dod` with a single call — `fs.symlinkSync(target, link, 'junction')`.
+
+That one call is correct on all three platforms. Node's `type` argument is "only used on Windows
+platforms" (nodejs.org/api/fs.html), where `'junction'` is what makes the link work without admin
+rights or Developer Mode; everywhere else the argument is ignored and the result is a plain
+directory symlink, which needs no privilege there either.
+
+Either way the link is transparent to the code above it — the Stop hook, running with cwd = the
+arm workspace, reads, writes and executes through it exactly as if `.dod/` were physically there,
+including running check scripts with the arm's own cwd.
 
 ## Injection: mandatory, not opt-in
 
@@ -266,7 +272,7 @@ The engine is always loaded regardless; it just has nothing to enforce.
 source `startup` or `clear` (never `resume`/`compact` — would fight the accumulated `history`):
 - reads `runs/run-NNN/dod-checks.json`; if absent, or no entry for this arm, skip silently
   (optimizer degrades gracefully without DoD tracking);
-- reads `.dod/sessions/<session_id>.json` through the junction — since dod-lite ships no
+- reads `.dod/sessions/<session_id>.json` through the link — since dod-lite ships no
   `SessionStart` hook of its own, this file will never already exist for a brand-new session id;
   this hook is the sole creator;
 - creates it from dod-lite's documented scaffold shape if absent, or merges into it if present

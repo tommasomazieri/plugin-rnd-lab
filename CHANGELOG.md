@@ -1,5 +1,85 @@
 # Changelog
 
+## The portability release — the harness leaves Windows
+
+**`optimizer` 0.7.0 → 0.8.0, `dod-lite` 0.4.0 → 0.4.1.**
+The marketplace ran on one operating system. Nothing about the *method* was Windows-specific —
+only the fifty lines that open a terminal window. Those are now one module with three branches.
+
+|  | before | after |
+|---|---|---|
+| platforms | Windows | Windows, macOS, Linux |
+| arm launcher | a generated `.ps1` under `cmd.exe`/`start` | a generated `.ps1` (Windows) or `.sh` (macOS/Linux) |
+| terminal hosts | Windows Terminal, `pwsh`, `powershell` | + Terminal.app, iTerm2, and ten Linux emulators, or `OPTIMIZER_TERMINAL` |
+| no terminal available | not a considered case | run is staged, `fire` prints the commands to start the arms by hand |
+| tests | 154 | 162 |
+
+### `/optimizer:fire` runs on macOS and Linux
+
+All platform-specific launch code moved out of `launch-pair.mjs` into
+`skills/fire/scripts/terminal.mjs`: the script dialect, the terminal probe, and the spawn.
+`launch-pair.mjs` reads as one flow again instead of a fork.
+
+- **macOS** — iTerm2 if installed, else Terminal.app, both via `osascript`. iTerm2 is driven
+  synchronously and falls back to Terminal.app if its scripting interface refuses, because a
+  silent AppleScript error would otherwise leave a manifest claiming an arm launched with no
+  window anywhere.
+- **Linux** — the first of GNOME Terminal, Konsole, Xfce Terminal, kitty, Alacritty, WezTerm,
+  Tilix, Terminator, `x-terminal-emulator` or xterm found on `PATH`.
+- **`OPTIMIZER_TERMINAL`** overrides the probe on every platform.
+- Window titles are set by the script itself with an OSC 0 escape, so no host branch has to
+  know how its emulator spells `--title`.
+- The POSIX launcher preserves argv with `set --` plus `"$@"`, the exact counterpart of the
+  PowerShell array-and-splat. Paths in an experiments root have spaces in them and the opening
+  prompt has punctuation in it; neither dialect hand-quotes a command line.
+
+### A run with nowhere to open a window is staged, not failed
+
+Headless boxes, SSH sessions, and emulators the probe does not know used to be outside the
+harness's world. Now the workspaces, artifacts, prepare steps and manifest are all still built,
+both arms are recorded as `staged`, and `fire` prints the two commands to run. If one arm's
+window opens and the other's does not, **both** fall back — one arm in a terminal and one
+nowhere looks like a fired run and analyzes as a broken one.
+
+### Fixed: the `.dod` link failing silently on a filesystem that cannot hold it
+
+`fs.symlinkSync(target, link, 'junction')` was already correct everywhere — Node ignores the
+`type` argument off Windows and produces a plain symlink, which needs no privilege there either.
+What was missing was the failure path: a network share or exFAT experiments root would throw and
+take the run down with an unreadable stack. It now aborts before launching, names the platform's
+likely cause, and says no arms were started.
+
+### Fixed: `dod-lite` leaked processes on macOS and Linux
+
+A check script's *children* survived `child.kill()`, held the inherited pipes open, and outlived
+the hook — so `close` never fired and the script timeout bought nothing. Windows had `taskkill /T`
+for this; POSIX had nothing. Check subprocesses are now spawned `detached` so they lead their own
+process group, and the timeout signals the group. This is the same defect the Windows branch was
+written to fix, on the two platforms nobody had run it on.
+
+### Fixed: default check runners that do not exist off Windows
+
+`.ps1` mapped to `powershell -ExecutionPolicy Bypass`, a spelling and a flag that both fail on
+macOS and Linux (`pwsh`, and `-ExecutionPolicy` is Windows-only). `.py` mapped to `python`, which
+on current macOS and most Linux distros is absent or a stub. Both are now platform-aware, and
+both remain overridable per experiment in `.dod/config.json`.
+
+### The platform matrix is tested from any platform
+
+`terminal.mjs`'s script builders take an explicit platform, so all three dialects are asserted
+from whichever one is running — the branch its author cannot run being the one most likely to
+be wrong. Eight new tests cover the three quoting dialects, PATH probing, and dialect isolation.
+The POSIX launcher is additionally **executed** under `sh` against a stub `claude` that records
+its argv, cwd and environment: `sh` ships with Git for Windows, so the Linux/macOS arm launcher
+runs for real on every commit regardless of who is committing.
+
+### Removed
+
+`idea.txt` — the design brief for the two-plugin split, written before that split shipped and
+fully superseded by the README and the release notes below. It is in the history.
+
+---
+
 ## The discovery release — `ab-bench` becomes a two-instrument loop
 
 **Comparing `8d6a671` (2026-08-04) → `5b99069` (2026-08-07).**

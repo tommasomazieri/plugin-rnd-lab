@@ -146,4 +146,4 @@ what lets `/optimizer:analyze` separate a plugin problem from bad operator promp
   list — a generic read-only guarantee that also covers project-specific MCP tools, not just
   Claude Code's builtins.
 - Still resolves `.dod/` as a direct child of `cwd`, no upward search — each arm workspace needs
-  `.dod` linked (directory junction) to the shared experiment-root `.dod/`. See `dod-contract.md`.
+  `.dod` linked (junction on Windows, symlink elsewhere) to the shared experiment-root `.dod/`. See `dod-contract.md`.

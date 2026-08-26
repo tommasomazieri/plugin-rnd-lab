@@ -2,7 +2,7 @@
   "name": "dod-lite",
   "displayName": "dod-lite",
   "description": "Internal, hooks-only Definition-of-Done AUDITOR for optimizer's arm sessions: runs script and AI-graded checks (defined externally by optimizer, never designed in-session) at every Stop and records a per-turn report. Observational by construction — it never speaks to the session it measures. Not for standalone/manual use.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": {
     "name": "Tommaso Mazieri"
   },

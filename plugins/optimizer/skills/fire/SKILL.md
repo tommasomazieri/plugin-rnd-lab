@@ -84,6 +84,11 @@ Two titled terminals open ("AB <experiment> control run-NNN" / "... test ..."). 
 SessionStart hook links its session id + transcript path into `manifest.json`, registers the
 DoD tracker, and **arms that arm's turn counter**.
 
+If no terminal could be opened (headless, SSH, or an emulator the launcher does not know),
+both arms are reported `staged` and the output ends with the two commands to run. Start them
+yourself, each in its own window, and continue from step 3 as normal — everything else about
+the run is already in place. `OPTIMIZER_TERMINAL=<command>` names a terminal to use next time.
+
 ## 3. Verify BOTH arms are measurable — before handing off
 
 Wait ~30s for both terminals to reach their first prompt, then:

@@ -41,17 +41,45 @@ real pass:
    anywhere `env.json` / `config.json` values get read into a shell command or file path.
    Check for injection or path-escape if any of those values could ever be attacker- or
    careless-user-supplied.
-2. Re-read `plugins/optimizer/README.md`'s "Windows only" disclosure against the actual code —
-   confirm a Mac/Linux visitor sees this before installing, not after wasting an hour.
+2. ~~Re-read `plugins/optimizer/README.md`'s "Windows only" disclosure against the actual code.~~
+   **Closed 2026-08-26 by porting rather than by disclosing** — see the audit log below.
 3. Do one full clean-install dry run of the documented Quickstart exactly as written, as a
    first-time stranger would follow it (`marketplace add` -> install `core` -> `/core:learn`),
    in a scratch directory. Fix anything that doesn't work as documented.
-4. Skim every plugin's skill files for leftover TODO/FIXME/placeholder text that would read as
-   unfinished to an outside visitor.
+4. ~~Skim every plugin's skill files for leftover TODO/FIXME/placeholder text.~~ **Clean as of
+   2026-08-26** — see below.
 
 If this turns up a real defect, fix it and let the test suite and a re-run of this checklist
 confirm the fix before moving to step 1 of the plan. Do not publicize a plugin with a known,
 unresolved defect.
+
+### Audit log
+
+**2026-08-26 — cross-platform port + tidy-up.** What was checked and what came of it:
+
+- **Item 2 resolved by fixing, not documenting.** The "Windows only" disclosure was accurate,
+  and the underlying limit was ~50 lines of terminal-spawning code, not anything about the
+  method. Ported to macOS and Linux; all platform-specific code now lives in
+  `plugins/optimizer/skills/fire/scripts/terminal.mjs`. Two latent POSIX defects in `dod-lite`
+  were found while porting and fixed (leaked check-script process trees; default `.ps1`/`.py`
+  runners that do not exist off Windows). See the CHANGELOG's portability release.
+- **Item 4 clean.** No TODO/FIXME/XXX/HACK/placeholder/TBD anywhere outside test fixtures.
+- **Partial on item 1.** The specific surface this file names was reviewed and is sound:
+  `parseDeliver` already validates env var names against `/^[A-Za-z_][A-Za-z0-9_]*$/` and
+  already rejects absolute paths and `..` in workspace subpaths, so no `env.json` value reaches
+  a shell unquoted. The one place an `env.json` value still lands on a command line rather than
+  in an argv slot — the `cmd.exe`/`start` fallback window title — is now reduced to a plain
+  label first. **A full repo-wide `/security-review` has still not been run.**
+- **Partial on item 3.** The repo was cloned to a scratch directory and the full suite run from
+  the clone, which proves nothing untracked is load-bearing. `claude plugin validate --strict`
+  passes on the marketplace manifest and on all four plugins. **The documented Quickstart has
+  not been walked end to end as a stranger** (`marketplace add` -> install -> `/core:learn`).
+- 162 tests pass: prospector 44, optimizer 84, dod-lite 34.
+- **Not verified: the macOS and Linux launch paths have never been run on a Mac or a Linux
+  box.** The POSIX launcher script is executed for real by the test suite (under `sh`, against
+  a stub `claude`, asserting argv/cwd/env), so the *script* is known good. What is unproven is
+  the window-opening layer: `osascript` against Terminal.app and iTerm2, and each Linux
+  emulator's argument spelling. First run on either platform should be treated as a smoke test.
 
 ## The plan
 

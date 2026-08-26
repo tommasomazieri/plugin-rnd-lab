@@ -27,8 +27,8 @@
  *      a build is not a property of the thing under test, so its cost is kept out of the
  *      arm's metrics and its failure is caught here rather than at analyze time
  *   4. copy task.md -> <workspace>/TASK.md
- *   5. link <workspace>/.dod as a directory junction to <testenvRoot>/.dod — REQUIRED because
- *      dod-lite resolves .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
+ *   5. link <workspace>/.dod to <testenvRoot>/.dod — REQUIRED because dod-lite resolves
+ *      .dod as a direct child of cwd, no upward search (see docs/dod-contract.md)
  *   6. write <workspace>/.claude/settings.json with the SessionStart linkage hook
  *      (arm-session-start.mjs: manifest linkage + .dod registration + turn-counter init)
  *      and the Stop turn-counter hook (arm-turn-count.mjs)
@@ -40,13 +40,13 @@
  *
  * The opening prompt is a fixed constant for parity across arms and across experiments.
  *
- * Terminal host: Windows Terminal + PowerShell, via a generated .ps1 per arm. The launch
- * recipe was originally `start "title" cmd /k <batch>`, ported from agentic_pm_app
- * ccLauncher.ts. It ran, and it put both arms in a legacy conhost console, where Claude
- * Code's TUI renders with no colour at all. For a benchmark whose deliverable is visual
- * and whose operator watches two windows side by side for hours, a monochrome console is
- * a real defect, not a cosmetic one. wt.exe is used when present, with pwsh.exe and then
- * powershell.exe as fallbacks; the choice is made once and applied to both arms.
+ * Terminal host and launcher dialect are both platform-specific and both live in
+ * terminal.mjs: a generated .ps1 under Windows Terminal on win32, a generated .sh under
+ * Terminal.app/iTerm2 on macOS, and under whichever emulator is installed on Linux. The
+ * host is resolved ONCE and applied to both arms — two arms in two different terminals
+ * would be a parity break in the most literal sense. Where no terminal can be opened
+ * (headless, SSH, an unlisted emulator) the pair is staged and the operator is given the
+ * two commands to run; see manualLaunchInstructions.
  *
  * --dry-run: compose .launch/ artifacts + parity report, spawn nothing, write no
  * manifest (run stays fireable).
@@ -55,10 +55,17 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeArtifacts, describeResolved } from '../../../lib/artifacts.mjs';
+import {
+  buildLaunchScript,
+  launchScriptExt,
+  manualLaunchInstructions,
+  resolveTerminalHost,
+  spawnTerminal,
+} from './terminal.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ARM_HOOK_SCRIPT = path.join(SCRIPT_DIR, 'arm-session-start.mjs');
@@ -433,83 +440,52 @@ function writeWorkspaceSettings(workspace, manifestPath, arm, dodDir) {
 
 // dod-lite resolves .dod as a direct child of cwd (no upward search) — see
 // docs/dod-contract.md. Link each arm workspace's .dod to the shared experiment-level
-// .dod/ via a Windows directory junction (no admin rights required), so dod-lite's own
-// hooks — running with cwd = the arm workspace — transparently read/write the shared folder.
+// .dod/, so dod-lite's own hooks — running with cwd = the arm workspace — transparently
+// read and write the shared folder.
+//
+// The 'junction' type is what makes this work unprivileged on Windows, where a plain
+// symlink needs Developer Mode or an elevated shell. Node ignores the type argument
+// everywhere else ("only used on Windows platforms" — nodejs.org/api/fs.html), so the
+// same call is a plain directory symlink on macOS and Linux, which needs no privilege
+// there either. One call, one behaviour, three platforms.
 function linkDodFolder(workspace, dodDir) {
   const link = path.join(workspace, '.dod');
   if (fs.existsSync(link)) {
     console.error(`[optimizer] WARN: ${link} already exists — not linking to shared .dod (did seed/ contain a .dod folder?)`);
     return;
   }
-  fs.symlinkSync(dodDir, link, 'junction');
+  try {
+    fs.symlinkSync(dodDir, link, 'junction');
+  } catch (err) {
+    fail(
+      `could not link ${link} -> ${dodDir}: ${err.message}\n` +
+        '  Both arms record their DoD evidence through this link. Without it the run would\n' +
+        '  produce no evidence at all, which is indistinguishable later from every check passing.\n' +
+        (process.platform === 'win32'
+          ? '  On Windows this needs no admin rights; a failure here usually means the experiments\n' +
+            '  root is on a filesystem that does not support junctions (a network share, some\n' +
+            '  virtualised mounts). Move experiments_root onto a local NTFS path.\n'
+          : '  A failure here usually means the experiments root is on a filesystem that does not\n' +
+            '  support symlinks (some network mounts, exFAT, a container volume mounted noexec).\n' +
+            '  Move experiments_root onto a local filesystem.\n') +
+        '  No arms were launched.',
+    );
+  }
 }
 
-/** A PowerShell single-quoted literal: nothing expands, only `'` needs doubling. */
-function psQuote(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function buildClaudeCommand(env, armConfig, settingsFile, mcpFile) {
+/**
+ * The claude argv for one arm, as an array — never as a command line.
+ *
+ * Splatted (PowerShell) or `set --`'d (sh) into place by terminal.mjs, so each element
+ * reaches claude as exactly one argv entry however many spaces and commas it contains.
+ */
+function buildClaudeArgs(env, armConfig, settingsFile, mcpFile) {
   const args = ['--model', env.model, '--settings', settingsFile];
   // always strict, even with an empty pool: arms must not fall back to globally configured MCPs
   args.push('--mcp-config', mcpFile, '--strict-mcp-config');
   for (const dir of armConfig.pluginDirs) args.push('--plugin-dir', dir);
   args.push(OPENING_PROMPT);
-  // Built as an array and splatted rather than as one interpolated command line. Paths
-  // here contain spaces and the opening prompt contains a period and a comma; hand-quoting
-  // that into a single string is how a launcher ends up passing half a prompt. Splatting
-  // hands each element to claude.exe as exactly one argv entry, whatever is inside it.
-  return [
-    `$claudeArgs = @(${args.map(psQuote).join(', ')})`,
-    '& claude @claudeArgs',
-  ].join('\r\n');
-}
-
-/**
- * Where the arm's terminal comes from, best first.
- *
- * The original recipe was `start "<title>" cmd /k <batch>`, inherited from an older
- * launcher. It works, and it is the wrong window: a legacy conhost console renders
- * Claude Code's TUI without colour, so both arms come up monochrome. That is not
- * cosmetic in a benchmark whose whole subject is a VISUAL deliverable — the operator
- * reads these two windows side by side for hours, and a washed-out console makes the
- * arms harder to tell apart and the output harder to judge.
- *
- * Windows Terminal is the right host: true colour, the tab title we already compute,
- * and a real PowerShell underneath. Fall back only when it genuinely is not installed.
- */
-function resolveTerminalHost() {
-  const wt = spawnSync('where', ['wt.exe'], { encoding: 'utf8', shell: true });
-  if (wt.status === 0 && (wt.stdout || '').trim()) return 'wt';
-  const pwsh = spawnSync('where', ['pwsh.exe'], { encoding: 'utf8', shell: true });
-  if (pwsh.status === 0 && (pwsh.stdout || '').trim()) return 'pwsh';
-  return 'powershell';
-}
-
-function spawnTerminal(title, scriptFile, host) {
-  // -NoExit keeps the window up after claude exits, so a crashed arm can still be read.
-  // -ExecutionPolicy Bypass because the launch script is generated, not signed.
-  const psArgs = `-NoExit -NoLogo -ExecutionPolicy Bypass -File "${scriptFile}"`;
-
-  let line;
-  if (host === 'wt') {
-    // `wt` takes the title itself, so no `start` wrapper and no lost quoting. Semicolons
-    // are wt's own argument separator and must be escaped in a path; none of ours contain
-    // one, but the title is operator-facing text, so strip them there.
-    line = `wt.exe --title "${title.replace(/;/g, ',')}" powershell.exe ${psArgs}`;
-  } else {
-    const exe = host === 'pwsh' ? 'pwsh.exe' : 'powershell.exe';
-    // `start` needs a title argument first or it eats the quoted exe path as the title.
-    line = `start "${title}" ${exe} ${psArgs}`;
-  }
-
-  const child = spawn('cmd.exe', ['/d', '/s', '/c', line], {
-    detached: true,
-    stdio: 'ignore',
-    windowsVerbatimArguments: true,
-  });
-  child.unref();
-  return child.pid ?? null;
+  return args;
 }
 
 function main() {
@@ -618,7 +594,8 @@ function main() {
     const workspace = path.join(runDir, arm);
     const settingsFile = path.join(launchDir, `${arm}.settings.json`);
     const mcpFile = path.join(launchDir, `${arm}.mcp.json`);
-    const scriptFile = path.join(launchDir, `${arm}.launch.ps1`);
+    const scriptFile = path.join(launchDir, `${arm}.launch${launchScriptExt()}`);
+    const armTitle = `AB ${env.experiment} ${arm} ${runName}`;
 
     fs.writeFileSync(settingsFile, JSON.stringify({ enabledPlugins: composed[arm].enabledPlugins }, null, 2));
     fs.writeFileSync(mcpFile, JSON.stringify({ mcpServers: composed[arm].mcpServers }, null, 2));
@@ -635,43 +612,12 @@ function main() {
       runPrepare(workspace, arm, pins, artifacts, launchDir, armEnv);
     }
 
-    const claudeCmd = buildClaudeCommand(env, composed[arm], settingsFile, mcpFile);
-    const script = [
-      '$ErrorActionPreference = "Continue"',
-      // UTF-8 in and out. The old cmd batch did this with `chcp 65001`; PowerShell needs
-      // the console encodings set explicitly or box-drawing and em dashes come out as
-      // mojibake in the arm's own TUI and in anything it echoes back.
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-      '$OutputEncoding = [System.Text.Encoding]::UTF8',
-      'chcp 65001 > $null',
-      ...Object.entries(armEnv).map(([k, v]) => `$env:${k} = ${psQuote(v)}`),
-      // this whole launcher runs via the Bash tool inside a Claude Code session, so
-      // CLAUDE_CODE_CHILD_SESSION/CLAUDECODE leak down through the spawn chain into each
-      // arm's claude.exe, which misclassifies it as nested and silently drops transcript
-      // persistence (hooks/cost tracking still work — separate subsystem).
-      // Confirmed via code.claude.com/docs/en/env-vars (CLAUDE_CODE_FORCE_SESSION_PERSISTENCE),
-      // this is the documented override for exactly this "background launcher" case.
-      '$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"',
-      // Same leak, different variable, and this one is why c2e3e68 did not fix what it
-      // was written to fix. Claude Code sets NO_COLOR=1 in the environment of the tool
-      // subprocesses it spawns, so a launcher run from inside a session hands NO_COLOR
-      // down the whole chain — cmd, wt, powershell, and finally the arm's own claude.exe,
-      // which honours it and renders its TUI monochrome. Verified process-scoped only:
-      // NO_COLOR is empty at both User and Machine scope on the operator's machine, so
-      // it is injected per-process rather than configured. c2e3e68 replaced the legacy
-      // cmd console with Windows Terminal on the theory that the HOST was washing out the
-      // colour; the host was innocent, and run-006 came up monochrome in Windows Terminal
-      // with terminal_host recorded as "wt". Scrubbing it here rather than in the spawn
-      // env is deliberate: the arm window must look the same whether it was fired from a
-      // Claude Code session, a bare PowerShell, or CI.
-      'Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue',
-      'Remove-Item Env:CLICOLOR -ErrorAction SilentlyContinue',
-      '$env:FORCE_COLOR = "1"',
-      '$env:CLICOLOR_FORCE = "1"',
-      `Set-Location -LiteralPath ${psQuote(workspace)}`,
-      claudeCmd,
-      '',
-    ].join('\r\n');
+    const script = buildLaunchScript({
+      workspace,
+      armEnv,
+      title: armTitle,
+      claudeArgs: buildClaudeArgs(env, composed[arm], settingsFile, mcpFile),
+    });
     fs.writeFileSync(scriptFile, script, 'utf8');
 
     if (dryRun) continue;
@@ -721,23 +667,41 @@ function main() {
   // Resolved once, so both arms are hosted identically. An asymmetry here would be a
   // parity break in the most literal sense: two arms in two different terminals.
   const host = noSpawn ? null : resolveTerminalHost();
-  if (host && host !== 'wt') {
-    console.log(`[optimizer] NOTE: wt.exe not found — falling back to ${host === 'pwsh' ? 'pwsh.exe' : 'powershell.exe'} in a standalone console. Install Windows Terminal for a colour-capable arm window.`);
-  }
+  const scriptFiles = ARMS.map((arm) => path.join(launchDir, `${arm}.launch${launchScriptExt()}`));
 
-  for (const arm of ARMS) {
-    if (noSpawn) {
-      // Workspaces, artifacts, prepare and the manifest are all real — only the terminal
-      // is withheld. Lets a run be staged and inspected (and tested) before it starts.
-      console.log(`[optimizer] --no-spawn: ${arm} arm staged at ${manifest.arms[arm].workspace}`);
-      manifest.arms[arm].status = 'staged';
-      continue;
+  // No terminal on this machine is a degraded mode, not a failed run: the workspaces,
+  // artifacts, prepare steps and manifest are all real, and the operator can start the
+  // two scripts by hand. Silently backgrounding them instead would produce a run nobody
+  // could watch, which is the one thing an A/B operator cannot work without.
+  if (!noSpawn && !host) {
+    console.log(`[optimizer] ${manualLaunchInstructions(scriptFiles)}`);
+    for (const arm of ARMS) manifest.arms[arm].status = 'staged';
+  } else {
+    if (host) console.log(`[optimizer] terminal host: ${host.label}`);
+    for (const [i, arm] of ARMS.entries()) {
+      if (noSpawn) {
+        // Workspaces, artifacts, prepare and the manifest are all real — only the terminal
+        // is withheld. Lets a run be staged and inspected (and tested) before it starts.
+        console.log(`[optimizer] --no-spawn: ${arm} arm staged at ${manifest.arms[arm].workspace}`);
+        manifest.arms[arm].status = 'staged';
+        continue;
+      }
+      const title = `AB ${env.experiment} ${arm} ${runName}`;
+      let pid = null;
+      try {
+        pid = spawnTerminal({ title, scriptFile: scriptFiles[i], host });
+      } catch (err) {
+        // One arm in a window and one nowhere is worse than neither: it looks like a
+        // fired run and analyzes as a broken one. Fall the whole pair back to manual.
+        console.error(`[optimizer] ERROR: could not open a terminal for the ${arm} arm — ${err.message}`);
+        console.log(`[optimizer] ${manualLaunchInstructions(scriptFiles)}`);
+        for (const a of ARMS) manifest.arms[a].status = 'staged';
+        break;
+      }
+      manifest.arms[arm].spawn_pid = pid;
+      manifest.arms[arm].terminal_host = host.id;
+      console.log(`[optimizer] launched ${arm} arm (pid ${pid ?? 'n/a'}) — "${title}"`);
     }
-    const title = `AB ${env.experiment} ${arm} ${runName}`;
-    const pid = spawnTerminal(title, path.join(launchDir, `${arm}.launch.ps1`), host);
-    manifest.arms[arm].spawn_pid = pid;
-    manifest.arms[arm].terminal_host = host;
-    console.log(`[optimizer] launched ${arm} arm (pid ${pid ?? '?'}) — "${title}"`);
   }
 
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));

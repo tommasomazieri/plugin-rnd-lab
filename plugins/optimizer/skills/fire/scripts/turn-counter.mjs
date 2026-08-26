@@ -13,8 +13,8 @@
  * events in that session stop being counted as fresh turns.
  *
  * So optimizer counts its own stop signals instead of borrowing someone else's:
- *   - node, not bash+python3 — no PATH/interpreter dependency inside the spawned
- *     `cmd /k` terminal, same runtime already proven to work for arm-session-start.mjs
+ *   - node, not bash+python3 — no PATH/interpreter dependency inside the spawned arm
+ *     terminal on any platform, and the same runtime already proven for arm-session-start.mjs
  *   - registered in <workspace>/.claude/settings.json (project scope), so it exists
  *     for the arm regardless of what the user's global settings do
  *   - `turns` counts stop signals where stop_hook_active is false (one real

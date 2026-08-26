@@ -278,15 +278,24 @@ export function seedExpectation(def) {
   return raw === 'pass' ? 'pass' : 'fail';
 }
 
-// child.kill() on Windows terminates only `claude` itself; the bash/python/node
-// processes it spawned survive, keep the inherited pipes open, and outlive the
-// hook. taskkill /T walks the tree.
+// child.kill() terminates only `claude` itself; the bash/python/node processes it
+// spawned survive, keep the inherited pipes open, and outlive the hook — so 'close'
+// never fires and the timeout above buys nothing. Every platform needs the whole tree
+// killed, only the spelling differs: taskkill /T walks it on Windows, and on POSIX the
+// child is its own process-group leader (see the `detached` flag in runProcess) so a
+// negative pid signals the group.
 function killTree(child) {
-  if (typeof child.pid === 'number' && process.platform === 'win32') {
+  if (typeof child.pid !== 'number') return;
+  if (process.platform === 'win32') {
     try {
       spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
       return;
     } catch { /* fall through to kill() */ }
+  } else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    } catch { /* group already gone, or never became a leader */ }
   }
   try { child.kill(); } catch { /* already exited */ }
 }
@@ -300,7 +309,16 @@ export function runProcess(cmd, args, opts, timeoutMs) {
       // interactive `python` a graded model runs via its own Bash tool)
       // block on stdin until this process's timeoutMs kill, instead of
       // hitting EOF immediately like a real closed stdin would.
-      child = spawn(cmd, args, { ...opts, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+      // detached on POSIX makes the child a process-group leader, which is the only way
+      // killTree can reach the grandchildren a check script spawns. It is a no-op for
+      // Windows, where taskkill /T walks the tree instead. The child is NOT unref'd: this
+      // process must still wait on it.
+      child = spawn(cmd, args, {
+        ...opts,
+        shell: false,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
     } catch (err) {
       resolve({ code: -1, stdout: '', stderr: err.message, timedOut: false, spawnFailed: true });
       return;

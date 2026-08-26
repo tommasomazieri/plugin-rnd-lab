@@ -31,7 +31,7 @@ it installs alongside, but it is internal — you never invoke it. See "DoD trac
 
 **Who this is for:** you're building (or evaluating) a Claude Code plugin and want proof it
 actually helps — not just a feeling. Not a general-purpose plugin, not a 2-minute install: it's a
-real testing harness with a learning curve. Windows only for now (see Prerequisites for why).
+real testing harness with a learning curve. Runs on Windows, macOS, and Linux.
 
 ## What's Prospector, in one paragraph
 
@@ -67,13 +67,17 @@ earned its keep, and what to fix before the next iteration.
 ## Prerequisites
 
 - [Claude Code](https://code.claude.com) CLI installed and on `PATH` as `claude`.
-- **Windows** right now. Two arm-specific reasons: `/optimizer:fire` opens each arm in its own
-  visible, titled terminal window via `cmd.exe`/`start` — there's no cross-platform way to do
-  that, macOS needs `osascript`/Terminal.app and Linux needs a specific terminal emulator, so
-  porting means a second launch path, not a one-line swap. Separately, each arm's `.dod/` links to
-  the shared experiment `.dod/` via a Windows directory junction (chosen because it needs no admin
-  rights, unlike a Windows symlink) — trivial to swap for a plain POSIX symlink, that part isn't
-  the blocker. Not yet ported to macOS/Linux.
+- **Windows, macOS, or Linux.** Only `/optimizer:fire` touches anything platform-specific: it
+  opens each arm in its own visible, titled terminal window, because an A/B run is something you
+  sit and watch two of, side by side.
+  - **Windows** — Windows Terminal if installed, otherwise a `powershell.exe` console.
+  - **macOS** — iTerm2 if installed, otherwise Terminal.app.
+  - **Linux** — the first of GNOME Terminal, Konsole, Xfce Terminal, kitty, Alacritty, WezTerm,
+    Tilix, Terminator, `x-terminal-emulator`, or xterm found on `PATH`. Set `OPTIMIZER_TERMINAL`
+    to the command for anything else; it takes precedence on every platform.
+
+  If none can be opened — a headless box, an SSH session, an emulator not on that list — the run
+  is still fully staged and `fire` prints the two commands to start the arms yourself.
 - Node.js (bundled scripts are plain `.mjs`, no dependencies to install).
 
 ## Install
@@ -206,7 +210,7 @@ plugins/dod-lite/                 optimizer's arm-side DoD auditor — hooks-onl
   README.md                       what it does inside an optimizer arm session
 ```
 
-For how optimizer actually works under the hood — experiment folder layout, the DoD junction trick,
+For how optimizer actually works under the hood — experiment folder layout, the shared-`.dod` link,
 parity rules, per-script ownership — see **`plugins/optimizer/README.md`**. This file is the
 "how do I get started" doc; that one is the "how does it work" doc.
 
