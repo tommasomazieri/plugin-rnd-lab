@@ -282,3 +282,7 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   showcase thread and requires a standalone post to explain how Claude Code was used and what you
   learned; the draft did neither. Next: read the removal reason in the inbox, ask the mods, and
   do not repost the same text.
+- 2026-09-22: removal reason confirmed by the bot's message: "Your account doesn't currently meet
+  the minimum age or karma requirements for posting in r/claudecode." The thresholds are not
+  published (not in the sidebar rules, not in the message, not findable on the web). Lesson for
+  the case study: check the posting account against the sub's gates before launch day.
