@@ -1,5 +1,38 @@
 # Changelog
 
+## The install-from-GitHub release — the first install nobody but the author had done
+
+**`optimizer` 0.8.0 → 0.8.1.** Found by installing the marketplace from the public repo into an
+isolated `CLAUDE_CONFIG_DIR`, exactly as a stranger would, before telling anyone it exists.
+
+### Fixed: Optimizer could not find dod-lite after a GitHub install
+
+A marketplace added from a local directory loads its plugins in place, so dod-lite sits next to
+optimizer. A marketplace added from GitHub copies every plugin into its own **versioned** cache
+folder (`cache/plugin-rnd-lab/optimizer/0.8.0/`, `cache/plugin-rnd-lab/dod-lite/0.4.1/`), and
+optimizer only ever looked for the first layout. For every GitHub install, `/optimizer:fire`
+refused to launch ("DoD audit engine not found") and `/optimizer:plan`'s check probe crashed on
+its import. The author's own setup is a local marketplace, so no test and no real run ever saw it.
+
+`lib/dod-lite-dir.mjs` now owns both layouts, newest cached version first, and the launcher and
+the probe both go through it. The new suite builds the cached layout from the real plugin files
+and runs the real launcher and probe inside it.
+
+### Fixed: two injection paths, from the pre-launch security review
+
+- PowerShell ends a single-quoted literal on the typographic quotes `‘ ’ ‚ ‛` as well as on `'`.
+  The Windows arm launcher escaped only `'`, so an experiment named with a phone-typed apostrophe
+  broke the launcher, and a crafted name could run code in it. All four are escaped now, and a
+  test round-trips hostile values through a real `powershell.exe`.
+- A pinned ref that began with `-` reached `git worktree add` as an option. Git allows no such
+  ref name, so they are refused.
+
+### Install instructions point at GitHub, over HTTPS
+
+The README described a local clone. It now leads with the public repo, and uses the HTTPS URL
+rather than the `owner/repo` shorthand: the shorthand clones over SSH and fails with "Host key
+verification failed" on any machine without an SSH key set up for GitHub.
+
 ## The portability release — the harness leaves Windows
 
 **`optimizer` 0.7.0 → 0.8.0, `dod-lite` 0.4.0 → 0.4.1.**

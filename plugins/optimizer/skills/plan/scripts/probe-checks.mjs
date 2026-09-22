@@ -47,8 +47,27 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import {
+import { resolveDodLiteDir, dodLiteSearchPaths } from '../../../lib/dod-lite-dir.mjs';
+
+// The probe runs checks through dod-lite's own code, so a probe verdict means what a run's
+// verdict will mean. dod-lite is a separate plugin, and a static `../../../../dod-lite` import
+// only resolves in a clone: a GitHub install puts each plugin in its own versioned cache
+// folder, where that import failed before the probe could print a word.
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const DOD_LITE_DIR = resolveDodLiteDir(PLUGIN_ROOT);
+if (!DOD_LITE_DIR) {
+  console.error(
+    '[probe-checks] ERROR: DoD audit engine (dod-lite) not found. Looked in:\n' +
+      dodLiteSearchPaths(PLUGIN_ROOT).map((p) => `    ${p}\n`).join('') +
+      '  Install it from the same marketplace as optimizer:\n' +
+      '    claude plugin install dod-lite@plugin-rnd-lab',
+  );
+  process.exit(1);
+}
+const dodLite = (rel) => import(pathToFileURL(path.join(DOD_LITE_DIR, 'hooks', rel)).href);
+const {
   loadCheckDefs,
   seedExpectation,
   runScriptCheck,
@@ -56,8 +75,8 @@ import {
   runWithConcurrency,
   loadSystemPrompt,
   validateCheckerModel,
-} from '../../../../dod-lite/hooks/dod-check.mjs';
-import { loadRunners } from '../../../../dod-lite/hooks/lib.mjs';
+} = await dodLite('dod-check.mjs');
+const { loadRunners } = await dodLite('lib.mjs');
 
 const PROBE_CONCURRENCY = 4;
 

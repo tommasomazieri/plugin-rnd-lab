@@ -1,9 +1,45 @@
 # plugin-rnd-lab
 
-A Claude Code **marketplace** for plugin R&D tooling — instruments for testing, measuring, and
-iterating on other Claude Code plugins.
+**Does your Claude Code plugin actually help, or does it just feel that way?**
 
-Two instruments, operating at different stages (plus `core`, which teaches them — see Install):
+Two instruments for finding out, one on each side of building a plugin:
+
+- **Prospector**, before you build it: *is this worth building at all?* It interviews you for
+  what you actually did, not what you'd like, checks whether the thing already exists, and ships
+  narrow MVPs you then use in your real work.
+- **Optimizer**, after you build it: *does it actually help?* It opens two paired Claude Code
+  sessions on the same task, one with your plugin and one without, and you work both. Then it
+  turns the two transcripts, Definition-of-Done checks written before either session started, and
+  your own verdict into one evidence-backed report.
+
+## How is this different from `claude plugin eval`?
+
+Claude Code now ships [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals), and
+for many plugins it is the right tool. Each case is a fresh, non-interactive session that gets one
+prompt and is graded automatically, three times with the plugin and three times without. It is
+cheap to repeat and it can gate CI.
+
+Optimizer measures what a single headless prompt cannot reach: a plugin whose value shows up only
+when a person is in the conversation.
+
+| | `claude plugin eval` | Optimizer |
+|---|---|---|
+| the session | non-interactive, one prompt | interactive, as long as the work takes |
+| who is in the loop | nobody | you, working both sessions |
+| the workspace | empty, or built by a scaffold script | your seed files, copied into both sessions |
+| grading | regex, tool-use and model-judged graders | Definition-of-Done checks (script, model-judged, human), transcript comparison, your verdict |
+| sample size | 3 runs per case per side, by default | one paired run at a time |
+| built for | skills that should trigger and finish on one request; CI | planning, brainstorming, interview and review workflows; real multi-turn work |
+
+The price of that is sample size: a paired run is one data point, and you are part of it. Every
+prompt you type into one session but not the other is recorded as a bias indicator rather than
+hidden. Use both tools: `plugin eval` for regressions on every change, Optimizer for whether the
+plugin makes your real sessions better.
+
+## The two instruments
+
+A Claude Code **marketplace** for plugin R&D tooling. Two instruments, operating at different
+stages (plus `core`, which teaches them — see Install):
 
 | | **Prospector** | **Optimizer** |
 |---|---|---|
@@ -83,12 +119,17 @@ earned its keep, and what to fix before the next iteration.
 ## Install
 
 ```
-claude plugin marketplace add <path-to-this-repo>
+claude plugin marketplace add https://github.com/tommasomazieri/plugin-rnd-lab.git
 claude plugin install core@plugin-rnd-lab           # start here — teaches both stages
 claude plugin install optimizer@plugin-rnd-lab
 claude plugin install prospector@plugin-rnd-lab     # optional — the discovery stage
 claude plugin install dod-lite@plugin-rnd-lab       # required by optimizer: its arm instrument
 ```
+
+Use the full HTTPS URL. The `tommasomazieri/plugin-rnd-lab` shorthand clones over SSH, and fails
+with "Host key verification failed" on a machine without an SSH key set up for GitHub.
+
+Restart Claude Code (or run `/reload-plugins`) afterwards so the new skills load.
 
 `core` ships one skill, `/core:learn`, and writes nothing — it is the walkthrough for everything
 below. Install it first if you have not used either instrument before.
@@ -97,24 +138,27 @@ below. Install it first if you have not used either instrument before.
 and two plugins are new. See [CHANGELOG.md](CHANGELOG.md) — existing experiments need no
 migration, but leave your `.ab-bench/` directories alone.
 
-`dod-lite` must be installed for `/optimizer:fire` to work. An installed plugin cannot reach
-files outside its own directory, so the Optimizer resolves the audit instrument as a cached
-sibling — and refuses to launch a run at all if it is missing, rather than producing an
-uninstrumented run that looks identical to one where every check passed.
+`dod-lite` must be installed for `/optimizer:fire` to work. The Optimizer finds the audit
+instrument next to its own install, and refuses to launch a run at all if it is missing, rather
+than producing an uninstrumented run that looks identical to one where every check passed.
 
-This repo is typically used as a **local** marketplace source (clone it, point `marketplace add`
-at the local path). Whenever you pull changes to this repo, refresh optimizer's cached copy:
+To update later:
 
 ```
 claude plugin marketplace update plugin-rnd-lab
-claude plugin update optimizer@plugin-rnd-lab
+claude plugin update optimizer@plugin-rnd-lab       # and each other plugin you installed
 ```
 
-`plugin update` only refreshes if `.claude-plugin/plugin.json`'s `version` field changed — bump it
-after editing, or the update is a silent no-op. Restart Claude Code sessions afterward to pick up
-the change. `plugins/dod-lite/` needs none of this: optimizer passes it to each arm via
-`--plugin-dir`, read live off disk at launch time, not through Claude Code's install/cache
-mechanism at all — pulling this repo is enough.
+### Working from a clone
+
+If you are changing the plugins themselves, clone the repo and add the marketplace from the local
+path instead: `claude plugin marketplace add <path-to-your-clone>`. A marketplace added from a
+local directory loads its plugins in place, so your edits are live after a Claude Code restart,
+and dod-lite is read straight from `plugins/dod-lite/` at each launch.
+
+`plugin update` only refreshes a *cached* install if `.claude-plugin/plugin.json`'s `version`
+field changed. Bump it whenever you change a plugin, or everyone who installed from GitHub keeps
+the old copy and the update is a silent no-op.
 
 If you also run a fully-featured standalone dod-lite install (a different, unrelated plugin — see
 `plugins/dod-lite/README.md`) in your own general Claude Code sessions, that's unaffected: it never
@@ -125,9 +169,14 @@ shares a session with the trimmed copy optimizer injects into its arms.
 optimizer keeps every experiment it creates in one folder outside any project repo, reused across
 every experiment (`env.json`, seed files, run history, transcripts). That folder is a plugin
 [user configuration](https://code.claude.com/docs/en/plugins-reference#user-configuration) value
-(`experiments_root`) — Claude Code prompts for it the first time you enable the plugin. If you
-skipped that prompt, or want to change the folder later, run `/optimizer:setup` (user-invoked
-only) any time.
+(`experiments_root`). Installing from the `/plugin` menu prompts for it; `claude plugin install`
+from a shell does not, and prints a reminder instead. Either set it at install time:
+
+```
+claude plugin install optimizer@plugin-rnd-lab --config experiments_root=<folder>
+```
+
+or run `/optimizer:setup` (user-invoked only) any time, which is also how you change it later.
 
 ## DoD tracking (built in)
 

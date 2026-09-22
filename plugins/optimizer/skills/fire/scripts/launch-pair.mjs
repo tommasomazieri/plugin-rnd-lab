@@ -59,6 +59,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeArtifacts, describeResolved } from '../../../lib/artifacts.mjs';
+import { resolveDodLiteDir, dodLiteSearchPaths } from '../../../lib/dod-lite-dir.mjs';
 import {
   buildLaunchScript,
   launchScriptExt,
@@ -74,9 +75,11 @@ const TURN_COUNT_SCRIPT = path.join(SCRIPT_DIR, 'arm-turn-count.mjs');
 // --plugin-dir the same way a previous-version baseline's worktree is, never via env.json/
 // enabledPlugins. It is a separate plugin and must stay one: an arm has to load the auditor and
 // NOTHING else, and folding it into optimizer would mean enabling optimizer's own skills inside
-// the very sessions being measured. Registered in marketplace.json so it is cached as a sibling
-// and this path resolves from a clone AND from an install. See docs/dod-contract.md.
-const DOD_LITE_DIR = path.resolve(SCRIPT_DIR, '..', '..', '..', '..', 'dod-lite');
+// the very sessions being measured. Registered in marketplace.json so it is installed alongside;
+// where "alongside" is on disk differs between a clone and a GitHub install, and
+// lib/dod-lite-dir.mjs owns both answers. See docs/dod-contract.md.
+const PLUGIN_ROOT = path.resolve(SCRIPT_DIR, '..', '..', '..');
+const DOD_LITE_DIR = resolveDodLiteDir(PLUGIN_ROOT);
 const ARMS = ['control', 'test'];
 const OPENING_PROMPT =
   'Read TASK.md in this directory and carry out the assignment exactly as written. Treat TASK.md as your task brief.';
@@ -93,16 +96,15 @@ function fail(msg) {
 // the plugin cache. Refuse to launch instead. A measurement harness running without its
 // instrument is worse than one that did not run at all.
 function assertDodEngine() {
-  const hook = path.join(DOD_LITE_DIR, 'hooks', 'dod-check.mjs');
-  if (fs.existsSync(hook)) return;
+  if (DOD_LITE_DIR) return;
   fail(
-    `DoD audit engine not found at ${DOD_LITE_DIR}\n` +
-      `  (looked for ${hook})\n` +
+    'DoD audit engine (dod-lite) not found. Looked in:\n' +
+      dodLiteSearchPaths(PLUGIN_ROOT).map((p) => `    ${p}\n`).join('') +
       '  Both arms are instrumented by plugins/dod-lite. Without it this run would record no DoD\n' +
       '  evidence at all, which is indistinguishable later from every check passing.\n' +
-      '  If optimizer was installed from a marketplace, check that dod-lite is registered in the\n' +
-      '  same marketplace.json so it gets cached alongside — an installed plugin cannot reach\n' +
-      '  files outside its own directory. No arms were launched.',
+      '  Install it from the same marketplace as optimizer:\n' +
+      '    claude plugin install dod-lite@plugin-rnd-lab\n' +
+      '  No arms were launched.',
   );
 }
 
