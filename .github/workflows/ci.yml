@@ -18,6 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -41,6 +42,7 @@ jobs:
   smoke-terminal-app:
     name: window smoke (macOS, Terminal.app)
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -53,19 +55,30 @@ jobs:
   smoke-iterm:
     name: window smoke (macOS, iTerm2)
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      # A Homebrew cask arrives quarantined, and its first open waits on a Gatekeeper dialog that
+      # nobody on a CI runner will click; the first attempt hung for the job's whole budget. A
+      # real iTerm2 user cleared that dialog the day they installed it. Clear it here, then let
+      # iTerm2 finish its first launch before the smoke asks it for a window.
       - run: brew install --cask iterm2
+      - run: |
+          xattr -dr com.apple.quarantine /Applications/iTerm.app || true
+          open -a /Applications/iTerm.app
+          sleep 15
       - run: node plugins/optimizer/test/smoke-window.mjs
+        timeout-minutes: 3
         env:
           SMOKE_EXPECT_TERM_PROGRAM: iTerm.app
 
   smoke-linux:
     name: window smoke (Linux, xterm)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
