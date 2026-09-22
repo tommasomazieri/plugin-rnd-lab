@@ -1,0 +1,25 @@
+How I A/B test an agent plugin when the value only shows up with a human in the loop
+
+Automated evals answer one question well: given this prompt, is the output better. They cannot answer the one I kept getting wrong about my own Claude Code plugins, which is whether a plugin makes a long working session better, when I am in the session steering it and my own enthusiasm is part of the measurement.
+
+So I built the harness I wanted and I would like it torn apart.
+
+The method:
+
+Two sessions are launched on the same task, in two real terminal windows. One has the plugin under test installed, the other does not. Same model, same seed files copied into both workspaces, same opening prompt. I work both of them as normal work, not as a demo.
+
+The success criteria are written before either session starts, as Definition-of-Done checks, and they are observation-only: script checks, model-judged checks, and checks only a human can answer. Writing them first is the part that stops me from deciding afterwards what counts as success. A check may never be the plugin's own gate, or it reports pass by construction.
+
+Every prompt I type is compared across the two sessions. Anything I typed into one and not the other is recorded as a bias indicator in the report rather than quietly dropped, because that asymmetry is usually where the result actually came from.
+
+At the end both transcripts, the check results and my own verdict get fused into one report: quality against a rubric, input and output tokens, turns, how much autonomy the session had, and what was actually delivered. Findings that contradict the numbers stay in the report.
+
+What it cannot do, stated plainly:
+
+One paired run is n=1. The operator is inside the experiment. Tasks differ between runs, so percentages across runs are not one curve, and the generated write-up says so instead of drawing a trend line through them. Anything I want to claim across runs has to survive a repeat on a fresh task.
+
+Where it fits next to headless evals: Claude Code ships `claude plugin eval`, which runs each case non-interactively, one prompt, graded automatically, several times per side. That is the right tool for a skill that should trigger and finish on one request, and it is cheap enough for CI. Mine is for the other kind: planning, interviewing, review and brainstorming workflows, where the plugin's effect is spread over twenty turns of conversation.
+
+It is free and MIT, and it runs on Windows, macOS and Linux: https://github.com/tommasomazieri/plugin-rnd-lab
+
+What I am after here is criticism of the method. Where would you expect this to produce a confident wrong answer?

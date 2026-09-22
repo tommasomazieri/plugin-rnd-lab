@@ -333,3 +333,21 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   one had a single day, so the account gate that removes posts does not apply to comments there.
   People do share plugins in it. Draft comment: `launch/reddit-showcase-comment.txt`, written to
   rule 5 (how Claude Code was used, what was learned).
+- 2026-09-23: measured the free channels instead of trusting their rule pages. Reddit, share of
+  recent posts removed (arctic-shift, 100-200 posts per window, two windows each so a mod-queue
+  snapshot cannot explain it): LLMDevs 15-29% (all Reddit's own spam filter), LocalLLaMA 17-18%,
+  ClaudeCode 20-29%, AI_Agents 36-38%, SideProject 55-73%, ChatGPTCoding 65-83%, vibecoding
+  73-84%, opensource 93-97% (mostly moderator), ClaudeAI 97-98% (automod-filtered, still filtered
+  in a 14-day-old window). Account age of surviving posters, 25 sampled per sub: LLMDevs 2 under
+  30 days (youngest 13), AI_Agents 2 under 30 (youngest 3), SideProject 4 under 30 (youngest 0),
+  ClaudeAI none under 90. So a new account can survive in LLMDevs, AI_Agents and SideProject, and
+  ClaudeAI is closed to everyone new.
+  Other channels: Anthropic's Discord ("Claude", discord.gg/anthropic) 128,174 members and 20,878
+  online, no reputation gate. awesome-claude-code (54,445 stars) takes an issue-form submission;
+  resource issues were being closed on 2026-09-21 and 22, so the queue moves, though 1,108 are
+  open. dev.to is a firehose, not a community: 100 articles tagged #claude in 30 days, median 0
+  reactions and 0 comments. "Show and tell" Discussions in davila7/claude-code-templates (31k
+  stars) and wshobson/agents (40k stars) run at 1 upvote and 0 comments. community.anthropic.com
+  does not exist.
+  Drafts ready: `launch/discord-claude-server.txt`, `launch/reddit-llmdevs-post.txt`,
+  `launch/awesome-claude-code-submission.txt`, `launch/reddit-showcase-comment.txt`.

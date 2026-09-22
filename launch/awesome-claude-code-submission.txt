@@ -1,0 +1,19 @@
+Form: https://github.com/hesreallyhim/awesome-claude-code/issues/new?template=recommend-resource.yml
+
+Display Name:
+plugin-rnd-lab
+
+Category:
+Testing
+
+Link:
+https://github.com/tommasomazieri/plugin-rnd-lab
+
+Author Name:
+tommasomazieri
+
+Author Link:
+https://github.com/tommasomazieri
+
+Description:
+A marketplace of R&D tooling for Claude Code plugins. Optimizer runs a plugin against a paired control session on the same task, with the operator working both arms, and reports quality, tokens, turns and autonomy against Definition-of-Done checks written before the run. Prospector covers the stage before that, interviewing for real behaviour and shipping narrow MVPs until a direction holds.
