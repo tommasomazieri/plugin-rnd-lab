@@ -323,6 +323,7 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   narrow slice of Claude Code users fit worse (claudemarketplaces.com/advertise). EthicalAds:
   $1,000 minimum buy, priced per thousand impressions (ethicalads.io/advertisers/pricing).
   Reddit Ads: $5/day minimum, community targeting reaches people who joined or visited a
-  subreddit in the last 28 days, and it is not subject to a sub's posting karma filter
-  (business.reddithelp.com, via search; the pages render in JavaScript). anthropics/claude-code
+  subreddit in the last 28 days (business.reddithelp.com, via search; the pages render in
+  JavaScript). An ad is not a post in the sub, so its karma filter should not apply: inferred,
+  not stated anywhere I read. anthropics/claude-code
   has GitHub Discussions switched off, so there is no show-and-tell there.
