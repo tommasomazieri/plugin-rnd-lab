@@ -24,6 +24,7 @@ import { spawn, spawnSync } from 'node:child_process';
 
 export const IS_WINDOWS = process.platform === 'win32';
 export const IS_MAC = process.platform === 'darwin';
+const ITERM_APP = '/Applications/iTerm.app';
 
 /**
  * Locate an executable by walking PATH ourselves.
@@ -208,8 +209,11 @@ export function resolveTerminalHost(env = process.env) {
   if (IS_MAC) {
     // iTerm2 first where it exists — it is the deliberate install, so it is the one the
     // operator is set up to read. Terminal.app is on every Mac and needs no probe.
-    if (fs.existsSync('/Applications/iTerm.app')) return { id: 'iterm', bin: 'open', label: 'iTerm2' };
-    return { id: 'terminal-app', bin: 'open', label: 'Terminal.app' };
+    // iTerm2 is addressed by the path just probed, not by name: `open -a iTerm` asks
+    // LaunchServices, which does not know a freshly installed app until it has been launched once
+    // ("Unable to find application named 'iTerm'" on the first macOS CI run).
+    if (fs.existsSync(ITERM_APP)) return { id: 'iterm', bin: 'open', app: ITERM_APP, label: 'iTerm2' };
+    return { id: 'terminal-app', bin: 'open', app: 'Terminal', label: 'Terminal.app' };
   }
 
   // Linux and the other unixes. A GUI terminal needs a display server; without one this
@@ -314,7 +318,7 @@ function spawnMacTerminal({ title, scriptFile, host }) {
   const openWith = (app) => spawnSync('open', ['-a', app, scriptFile], { encoding: 'utf8' });
 
   if (host.id === 'iterm') {
-    const r = openWith('iTerm');
+    const r = openWith(host.app);
     if (r.status === 0) return null;
     // Terminal.app is on every Mac, so there is always somewhere to fall back to.
     console.error(`[optimizer] NOTE: iTerm2 refused the launch (${(r.stderr || '').trim() || `exit ${r.status}`}) — using Terminal.app.`);
