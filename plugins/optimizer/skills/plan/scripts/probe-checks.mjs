@@ -49,7 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { resolveDodLiteDir, dodLiteSearchPaths } from '../../../lib/dod-lite-dir.mjs';
+import { resolveDodLiteDir, dodLiteSearchPaths, installedMarketplace } from '../../../lib/dod-lite-dir.mjs';
 
 // The probe runs checks through dod-lite's own code, so a probe verdict means what a run's
 // verdict will mean. dod-lite is a separate plugin, and a static `../../../../dod-lite` import
@@ -62,7 +62,7 @@ if (!DOD_LITE_DIR) {
     '[probe-checks] ERROR: DoD audit engine (dod-lite) not found. Looked in:\n' +
       dodLiteSearchPaths(PLUGIN_ROOT).map((p) => `    ${p}\n`).join('') +
       '  Install it from the same marketplace as optimizer:\n' +
-      '    claude plugin install dod-lite@plugin-rnd-lab',
+      `    claude plugin install dod-lite@${installedMarketplace(PLUGIN_ROOT)}`,
   );
   process.exit(1);
 }

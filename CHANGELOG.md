@@ -1,5 +1,21 @@
 # Changelog
 
+## Ready for the community directory: optimizer installs its own instrument
+
+**`optimizer` 0.8.2 → 0.8.3, `core` 0.1.0 → 0.1.1.** Prepared for Anthropic's community
+marketplace (`claude-community`), where every plugin is listed, reviewed and installed on its own.
+
+- **optimizer declares `dod-lite` as a dependency.** Installing optimizer used to need a second,
+  separate `claude plugin install dod-lite`, and without it `/optimizer:fire` refused to launch.
+  `claude plugin install optimizer@…` now installs dod-lite with it ("+ 1 dependency: dod-lite",
+  verified in a clean `CLAUDE_CONFIG_DIR`), and Claude Code keeps optimizer disabled while dod-lite
+  is missing or disabled. The README and `/core:learn` no longer list dod-lite as its own step.
+- **The "dod-lite not found" message names the right marketplace.** It told everyone to run
+  `claude plugin install dod-lite@plugin-rnd-lab`, which is wrong for anyone who installed from
+  the community directory. It now reads the marketplace from where optimizer was installed
+  (`lib/dod-lite-dir.mjs`, `installedMarketplace`), and a test runs the real probe from a
+  `claude-community` cache layout.
+
 ## The install-from-GitHub release — the first install nobody but the author had done
 
 **`optimizer` 0.8.0 → 0.8.2.** Found by installing the marketplace from the public repo into an

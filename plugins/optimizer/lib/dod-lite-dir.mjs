@@ -54,6 +54,20 @@ export function resolveDodLiteDir(pluginRoot) {
   return versions.length ? path.join(cachedParent, versions[0]) : null;
 }
 
+/**
+ * The marketplace optimizer was installed from, for the one command that fixes a missing dod-lite.
+ * The same plugins install as `@plugin-rnd-lab` from this repo and as `@claude-community` from
+ * Anthropic's community directory, and a hard-coded name sends the second group to a marketplace
+ * they never added. A cached install carries the name in its path
+ * (<cache>/<marketplace>/optimizer/<version>/); in place, the marketplace is this repo.
+ */
+export function installedMarketplace(pluginRoot) {
+  const parent = path.resolve(pluginRoot, '..');
+  return path.basename(parent) === 'optimizer'
+    ? path.basename(path.resolve(parent, '..'))
+    : 'plugin-rnd-lab';
+}
+
 /** Every place resolveDodLiteDir looked, for an error message that says where to check. */
 export function dodLiteSearchPaths(pluginRoot) {
   return [

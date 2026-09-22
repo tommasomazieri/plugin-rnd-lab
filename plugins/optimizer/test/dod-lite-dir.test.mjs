@@ -14,7 +14,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { resolveDodLiteDir } from '../lib/dod-lite-dir.mjs';
+import { resolveDodLiteDir, installedMarketplace } from '../lib/dod-lite-dir.mjs';
 
 const OPTIMIZER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DOD_LITE_ROOT = path.resolve(OPTIMIZER_ROOT, '..', 'dod-lite');
@@ -53,6 +53,26 @@ test('missing: no dod-lite in either layout is null, not a guessed path', () => 
     const optimizer = path.join(cache, 'plugin-rnd-lab', 'optimizer', '0.8.0');
     fs.mkdirSync(optimizer, { recursive: true });
     assert.equal(resolveDodLiteDir(optimizer), null);
+  } finally {
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('the install hint names the marketplace optimizer actually came from', () => {
+  assert.equal(installedMarketplace(OPTIMIZER_ROOT), 'plugin-rnd-lab');
+  const cached = path.join('cache', 'claude-community', 'optimizer', '0.8.3');
+  assert.equal(installedMarketplace(path.resolve(cached)), 'claude-community');
+});
+
+test('a directory install missing dod-lite is told to install it from claude-community', () => {
+  const cache = tmp();
+  try {
+    const optimizer = path.join(cache, 'claude-community', 'optimizer', '0.8.3');
+    fs.cpSync(OPTIMIZER_ROOT, optimizer, { recursive: true, filter: (src) => !src.split(path.sep).includes('test') });
+    const probe = spawnSync(process.execPath,
+      [path.join(optimizer, 'skills', 'plan', 'scripts', 'probe-checks.mjs')],
+      { encoding: 'utf8' });
+    assert.match(probe.stderr, /claude plugin install dod-lite@claude-community/, probe.stderr);
   } finally {
     fs.rmSync(cache, { recursive: true, force: true });
   }

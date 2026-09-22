@@ -59,7 +59,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeArtifacts, describeResolved } from '../../../lib/artifacts.mjs';
-import { resolveDodLiteDir, dodLiteSearchPaths } from '../../../lib/dod-lite-dir.mjs';
+import { resolveDodLiteDir, dodLiteSearchPaths, installedMarketplace } from '../../../lib/dod-lite-dir.mjs';
 import {
   buildLaunchScript,
   launchScriptExt,
@@ -103,7 +103,7 @@ function assertDodEngine() {
       '  Both arms are instrumented by plugins/dod-lite. Without it this run would record no DoD\n' +
       '  evidence at all, which is indistinguishable later from every check passing.\n' +
       '  Install it from the same marketplace as optimizer:\n' +
-      '    claude plugin install dod-lite@plugin-rnd-lab\n' +
+      `    claude plugin install dod-lite@${installedMarketplace(PLUGIN_ROOT)}\n` +
       '  No arms were launched.',
   );
 }

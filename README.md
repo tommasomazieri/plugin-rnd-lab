@@ -124,9 +124,8 @@ earned its keep, and what to fix before the next iteration.
 ```
 claude plugin marketplace add https://github.com/tommasomazieri/plugin-rnd-lab.git
 claude plugin install core@plugin-rnd-lab           # start here — teaches both stages
-claude plugin install optimizer@plugin-rnd-lab
+claude plugin install optimizer@plugin-rnd-lab      # also installs dod-lite, its arm instrument
 claude plugin install prospector@plugin-rnd-lab     # optional — the discovery stage
-claude plugin install dod-lite@plugin-rnd-lab       # required by optimizer: its arm instrument
 ```
 
 Use the full HTTPS URL. The `tommasomazieri/plugin-rnd-lab` shorthand clones over SSH, and fails
@@ -141,9 +140,11 @@ below. Install it first if you have not used either instrument before.
 and two plugins are new. See [CHANGELOG.md](CHANGELOG.md) — existing experiments need no
 migration, but leave your `.ab-bench/` directories alone.
 
-`dod-lite` must be installed for `/optimizer:fire` to work. The Optimizer finds the audit
-instrument next to its own install, and refuses to launch a run at all if it is missing, rather
-than producing an uninstrumented run that looks identical to one where every check passed.
+`dod-lite` is optimizer's declared dependency, so installing optimizer installs it too, and it has
+to stay enabled: Claude Code disables optimizer while dod-lite is missing or disabled. The
+Optimizer finds the audit instrument next to its own install, and refuses to launch a run at all
+if it is missing, rather than producing an uninstrumented run that looks identical to one where
+every check passed.
 
 To update later:
 

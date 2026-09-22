@@ -132,5 +132,6 @@ That is why `/prospector:reenter` uses `needs rank` and not `hypothesis rank`.
 ## Install order
 
 `core` is the entry point and writes nothing. `prospector` if you are starting from a
-frustration; `optimizer` + `dod-lite` together once something exists to measure — Optimizer will
-not fire without dod-lite installed.
+frustration; `optimizer` once something exists to measure. Installing it installs `dod-lite` too,
+as its declared dependency — Optimizer will not fire without it, and Claude Code disables
+Optimizer while dod-lite is missing or disabled.
