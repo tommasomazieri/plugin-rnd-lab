@@ -1,0 +1,21 @@
+I built an A/B test for Claude Code plugins with you in the loop, the part claude plugin eval can't cover. Looking for people to break it
+
+A couple of months ago I started building tools for a question I kept hitting: does this Claude Code plugin actually make my sessions better, or does it just feel that way?
+
+Claude Code recently shipped claude plugin eval, which answers part of that. It runs your plugin headless on a prompt, three times with it and three without, and grades the result. For skills that should trigger and finish on one request, it's the right tool, and it can gate CI.
+
+What it can't test is a plugin whose value shows up in a conversation: brainstorming, planning, interviews, review loops, anything where you answer questions, push back or steer. A headless run skips exactly the part those plugins are built for.
+
+That's the gap I built for. Two tools, one marketplace:
+
+Optimizer opens two Claude Code sessions side by side on the same task, one with your plugin and one without, same model, same files, same opening prompt. You work both like normal work. Definition-of-Done checks are written before either session starts, and at the end it combines both transcripts, the checks and your own verdict into one report. Any prompt you type in one session and not the other is recorded as a bias indicator instead of hidden.
+
+Prospector is for before you build: it interviews you about what you actually did rather than what you'd like, checks whether the thing already exists, and ships narrow MVPs you then use in your real work.
+
+The costs, up front. A paired run is one data point, and you're part of it. It takes two sessions' worth of tokens and your attention on both. Once installed, Optimizer adds about 1.5k tokens of context to every session and Prospector about 1k. It runs on Windows, macOS and Linux, but outside my own Windows machine it has only been tested on CI runners. It's early.
+
+So this isn't a launch, it's a request for help. If you build or use plugins, try it and tell me where it breaks, where it's confusing, where you stopped. If you only have five minutes, /core:learn walks through both tools without touching anything.
+
+Repo and install (free, MIT): https://github.com/tommasomazieri/plugin-rnd-lab
+
+How it went (about three minutes, mostly clicks): https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform

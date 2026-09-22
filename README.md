@@ -36,6 +36,9 @@ prompt you type into one session but not the other is recorded as a bias indicat
 hidden. Use both tools: `plugin eval` for regressions on every change, Optimizer for whether the
 plugin makes your real sessions better.
 
+**Tried it, or stopped halfway?** [Tell me how it went](https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform):
+about three minutes, mostly clicks.
+
 ## The two instruments
 
 A Claude Code **marketplace** for plugin R&D tooling. Two instruments, operating at different

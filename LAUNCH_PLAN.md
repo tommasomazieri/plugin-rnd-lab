@@ -157,12 +157,19 @@ collected in one place instead of scattered through comment threads.
 README opens with the question, then a plain comparison with `claude plugin eval`: what it does
 well, what Optimizer adds, and what Optimizer costs.
 
-### 2. The feedback form
+### 2. The feedback form — LIVE 2026-09-22
 
-`launch/feedback-form.gs` builds a Google Form plus a response Sheet in one run (instructions at
-the top of the file). Question 1, the only required one, is the funnel ("how far did you get?")
-and is answerable by someone who only read the post, so the drop-off point shows up even from
-people who never install. Once the form exists, link it from the post and from the README.
+https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+(linked from the README). Responses land in the Sheet the form was created with.
+
+The first version asked for opinions ("which would you reach for?", "what one change would make
+you use it again?", "was it worth it?") and the operator threw it out: a survey is an interview,
+and it follows Prospector's rule, behaviour over opinion. `launch/feedback-form.gs` now rebuilds
+the same form in place, same link: what they did, where they stopped and what they went back to,
+how each moment felt (grids), certainty before and after, what they did next. Scales and grids
+throughout, one optional open question about a single concrete moment, and a yes/no to a
+15-minute follow-up chat, which is where the real interviews come from. Only question 1, the
+funnel, is required. Rerun `rebuildFeedbackForm` after editing the questions; it keeps the link.
 
 ### 3. The first real paired run
 
@@ -196,6 +203,21 @@ is what gets shown.
   crosspost. Show HN is legitimate for the repo itself now that a stranger can install and run it.
   Read each subreddit's rules by hand first.
 - Be in the thread for the first hours; the form catches everything after.
+
+Draft for `r/ClaudeCode`: `launch/reddit-post-claudecode.txt` (title on line 1). Written before the
+first real run, so it shows no output yet; add the report screenshot when there is one. Do not
+paste the same text into a second subreddit: Reddit's Responsible Builder Policy names "posting
+identical or substantially similar content across subreddits" as spam.
+
+**Posting is manual, by decision (checked 2026-09-22).** Reddit ended self-service API access on
+2025-11-12; every new OAuth app needs approval under the Responsible Builder Policy, and
+r/redditdev threads through 2026 report refusals even for one-account posting tools. The same
+policy requires bots and AI agents to carry an app label and says "App accounts should solely be
+used to perform app functions (no mixed use accounts)", which rules out an agent posting from the
+operator's own account. Every Reddit MCP server that can post needs those API credentials.
+Browser automation of the logged-in account is possible but puts the launch account at risk for
+a two-paste job. Hacker News' official API has no submit endpoint. What is worth automating is
+reading the thread afterwards, not writing to it.
 
 ### 5. List it
 
