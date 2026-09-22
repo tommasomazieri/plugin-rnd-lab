@@ -311,3 +311,18 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   verified from GitHub into a clean config: "+ 1 dependency: dod-lite"). Added eight GitHub
   topics for crawler and topic-page discovery. Submission itself pending the operator's Console
   login.
+- 2026-09-22: submitted to the community directory through the Console form, once, as
+  `plugin-rnd-lab` with all four plugins described in the one box. Pending review.
+- 2026-09-22: the feedback link now reaches people inside the product (`cc22b3c`): the last line
+  of `/optimizer:analyze` on an env's first analysed run, `/optimizer:paper`, `/prospector:build`
+  on v1, `/prospector:handoff`, and the close of a `/core:learn` walkthrough; also GitHub's New
+  issue page and a README Feedback section. Directory installs get it once the catalog pin moves
+  past `cc22b3c`.
+- 2026-09-22: checked paid promotion. claudemarketplaces.com sells one sponsorship, $1,499/month,
+  about 1,700 clicks a month, sold out (book a call for a later slot); its own FAQ says tools for a
+  narrow slice of Claude Code users fit worse (claudemarketplaces.com/advertise). EthicalAds:
+  $1,000 minimum buy, priced per thousand impressions (ethicalads.io/advertisers/pricing).
+  Reddit Ads: $5/day minimum, community targeting reaches people who joined or visited a
+  subreddit in the last 28 days, and it is not subject to a sub's posting karma filter
+  (business.reddithelp.com, via search; the pages render in JavaScript). anthropics/claude-code
+  has GitHub Discussions switched off, so there is no show-and-tell there.
