@@ -46,6 +46,34 @@ test('PowerShell quoting doubles the single quote and leaves the rest inert', ()
   }
 });
 
+test('PowerShell quoting doubles the typographic single quotes too', () => {
+  // PowerShell closes a single-quoted literal on ‘ ’ ‚ ‛ as readily as on '. Doubling only
+  // the ASCII one let an experiment called "Tom’s run" end the literal and run the rest.
+  assert.equal(psQuote('Tom’s run'), "'Tom’’s run'");
+  assert.equal(psQuote('‘‚‛'), "'‘‘‚‚‛‛'");
+});
+
+// The string comparisons above only check what psQuote emits. This one asks PowerShell
+// itself, which is the only authority on what closes a literal.
+test('a PowerShell literal round-trips every quote character through a real parser', { skip: !IS_WINDOWS && 'needs powershell.exe' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'psquote-'));
+  try {
+    for (const value of ["Tom’s run’; Write-Output INJECTED; ’", "a'b‘c’d‚e‛f", "''’’"]) {
+      const file = path.join(dir, 'q.ps1');
+      fs.writeFileSync(file, '﻿' + [
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        `$t = ${psQuote(value)}`,
+        '[Console]::Out.Write($t)',
+        '',
+      ].join('\r\n'));
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8' });
+      assert.equal(r.stdout, value, `PowerShell read ${JSON.stringify(value)} back as ${JSON.stringify(r.stdout)} ${r.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('AppleScript quoting escapes backslash before quote, not after', () => {
   assert.equal(osaQuote('/Users/me/exp'), '"/Users/me/exp"');
   assert.equal(osaQuote('a"b'), '"a\\"b"');

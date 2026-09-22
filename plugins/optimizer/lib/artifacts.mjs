@@ -173,6 +173,12 @@ function listWorktrees(repo) {
 }
 
 function ensureWorktree(repo, ref, worktreePath) {
+  // `ref` lands in git's argv after the path, where a leading dash is read as an option, not
+  // a revision. No real ref can start with one — git refuses such branch and tag names, and a
+  // sha never does — so refusing it here costs nothing and closes the option-injection path.
+  if (String(ref).startsWith('-')) {
+    throw new Error(`ref "${ref}" starts with "-" — git would read it as an option, not a revision`);
+  }
   if (listWorktrees(repo).includes(path.resolve(worktreePath))) return { cached: true };
   if (fs.existsSync(worktreePath)) {
     if (fs.readdirSync(worktreePath).length > 0) {

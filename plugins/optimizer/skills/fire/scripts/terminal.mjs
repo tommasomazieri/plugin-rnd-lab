@@ -60,9 +60,17 @@ export function findOnPath(name, env = process.env) {
 
 /* ------------------------------------------------------------------ quoting */
 
-/** A PowerShell single-quoted literal: nothing expands, only `'` needs doubling. */
+/**
+ * A PowerShell single-quoted literal: nothing expands, only quote characters need doubling.
+ *
+ * "Quote characters" is four of them, not one. PowerShell's tokenizer treats the typographic
+ * single quotes U+2018, U+2019, U+201A and U+201B exactly like ASCII `'`, so doubling only
+ * `'` let an experiment named "Tom’s run" — the apostrophe any phone or word processor types —
+ * close the literal early and hand the rest of the name to the parser as code. Verified on
+ * Windows PowerShell 5.1. Doubling each one in place keeps the value byte-for-byte.
+ */
 export function psQuote(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
+  return `'${String(value).replace(/['‘’‚‛]/g, (q) => q + q)}'`;
 }
 
 /** A POSIX sh single-quoted literal: nothing expands, and `'` must leave and re-enter. */
