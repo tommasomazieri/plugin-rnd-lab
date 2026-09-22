@@ -107,7 +107,7 @@ earned its keep, and what to fix before the next iteration.
   opens each arm in its own visible, titled terminal window, because an A/B run is something you
   sit and watch two of, side by side.
   - **Windows** — Windows Terminal if installed, otherwise a `powershell.exe` console.
-  - **macOS** — iTerm2 if installed, otherwise Terminal.app.
+  - **macOS** — Terminal.app.
   - **Linux** — the first of GNOME Terminal, Konsole, Xfce Terminal, kitty, Alacritty, WezTerm,
     Tilix, Terminator, `x-terminal-emulator`, or xterm found on `PATH`. Set `OPTIMIZER_TERMINAL`
     to the command for anything else; it takes precedence on every platform.

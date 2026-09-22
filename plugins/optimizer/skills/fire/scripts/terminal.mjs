@@ -24,7 +24,6 @@ import { spawn, spawnSync } from 'node:child_process';
 
 export const IS_WINDOWS = process.platform === 'win32';
 export const IS_MAC = process.platform === 'darwin';
-const ITERM_APP = '/Applications/iTerm.app';
 
 /**
  * Locate an executable by walking PATH ourselves.
@@ -207,12 +206,13 @@ export function resolveTerminalHost(env = process.env) {
   }
 
   if (IS_MAC) {
-    // iTerm2 first where it exists — it is the deliberate install, so it is the one the
-    // operator is set up to read. Terminal.app is on every Mac and needs no probe.
-    // iTerm2 is addressed by the path just probed, not by name: `open -a iTerm` asks
-    // LaunchServices, which does not know a freshly installed app until it has been launched once
-    // ("Unable to find application named 'iTerm'" on the first macOS CI run).
-    if (fs.existsSync(ITERM_APP)) return { id: 'iterm', bin: 'open', app: ITERM_APP, label: 'iTerm2' };
+    // Terminal.app, always — it is on every Mac, and it is the one path proven in CI by opening
+    // a real window (test/smoke-window.mjs). iTerm2 used to be preferred where installed. Handed
+    // a file with `open -a`, iTerm2 returned success and never ran it: on the macOS CI runner no
+    // window ran the arm within 90s, which in a real run is a manifest saying "launched" over an
+    // arm that never started. Its other route, AppleScript, needs the Automation consent this
+    // module moved away from. An iTerm2 user loses only which app the two arm windows open in;
+    // OPTIMIZER_TERMINAL still overrides.
     return { id: 'terminal-app', bin: 'open', app: 'Terminal', label: 'Terminal.app' };
   }
 
@@ -314,18 +314,8 @@ function spawnWindowsTerminal({ title, scriptFile, host }) {
  */
 function spawnMacTerminal({ title, scriptFile, host }) {
   if (host.id === 'custom') return detached(host.bin, [scriptFile]);
-
-  const openWith = (app) => spawnSync('open', ['-a', app, scriptFile], { encoding: 'utf8' });
-
-  if (host.id === 'iterm') {
-    const r = openWith(host.app);
-    if (r.status === 0) return null;
-    // Terminal.app is on every Mac, so there is always somewhere to fall back to.
-    console.error(`[optimizer] NOTE: iTerm2 refused the launch (${(r.stderr || '').trim() || `exit ${r.status}`}) — using Terminal.app.`);
-  }
-
-  const r = openWith('Terminal');
-  if (r.status !== 0) throw new Error(`open could not start Terminal.app: ${(r.stderr || '').trim() || `exit ${r.status}`}`);
+  const r = spawnSync('open', ['-a', host.app, scriptFile], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`open could not start ${host.label}: ${(r.stderr || '').trim() || `exit ${r.status}`}`);
   return null;
 }
 

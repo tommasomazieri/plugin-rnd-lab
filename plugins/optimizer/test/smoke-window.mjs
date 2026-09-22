@@ -1,8 +1,8 @@
 // Opens a real terminal window through the real launcher and checks what arrived inside it.
 //
 // terminal.test.mjs proves the POSIX launch *script* is right by running it under `sh`. What no
-// unit test can reach is the layer above: `open -a` handing the launcher to Terminal.app or
-// iTerm2, and each Linux emulator's argument spelling. Those only prove themselves by opening a window, so this
+// unit test can reach is the layer above: `open -a` handing the launcher to Terminal.app, and
+// each Linux emulator's argument spelling. Those only prove themselves by opening a window, so this
 // is not part of `node --test` — CI runs it on machines that have a display (see
 // .github/workflows/ci.yml). It exits non-zero on anything short of a stub `claude`, started in
 // the new window, reporting the workspace, argv and env the arm would have had.
@@ -11,8 +11,8 @@
 // Terminal.app starts a fresh login shell, so nothing from this process's environment survives
 // into it. That is also how a real arm gets its variables.
 //
-// Optional: SMOKE_EXPECT_TERM_PROGRAM (e.g. Apple_Terminal, iTerm.app) asserts which app ran it,
-// since the iTerm2 branch falls back to Terminal.app and would otherwise pass for the wrong reason.
+// Optional: SMOKE_EXPECT_TERM_PROGRAM (e.g. Apple_Terminal) asserts which app ran it, so a
+// fallback to some other terminal cannot pass for the wrong reason.
 
 import fs from 'node:fs';
 import os from 'node:os';

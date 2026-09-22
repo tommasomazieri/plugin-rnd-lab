@@ -1,7 +1,10 @@
 # Every suite on every platform the harness claims, plus real terminal windows on the two
-# platforms the author does not use. The window-opening layer (osascript -> Terminal.app/iTerm2,
+# platforms the author does not use. The window-opening layer (`open -a Terminal` on macOS,
 # each Linux emulator's argv) cannot be unit-tested; it is proven only by opening a window,
 # which is what the smoke jobs do. See plugins/optimizer/test/smoke-window.mjs.
+#
+# There is no iTerm2 job because there is no iTerm2 path any more: handed a file with `open -a`,
+# iTerm2 reported success and never ran it (terminal.mjs, resolveTerminalHost).
 
 name: ci
 
@@ -51,29 +54,6 @@ jobs:
       - run: node plugins/optimizer/test/smoke-window.mjs
         env:
           SMOKE_EXPECT_TERM_PROGRAM: Apple_Terminal
-
-  smoke-iterm:
-    name: window smoke (macOS, iTerm2)
-    runs-on: macos-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      # A Homebrew cask arrives quarantined, and its first open waits on a Gatekeeper dialog that
-      # nobody on a CI runner will click; the first attempt hung for the job's whole budget. A
-      # real iTerm2 user cleared that dialog the day they installed it. Clear it here, then let
-      # iTerm2 finish its first launch before the smoke asks it for a window.
-      - run: brew install --cask iterm2
-      - run: |
-          xattr -dr com.apple.quarantine /Applications/iTerm.app || true
-          open -a /Applications/iTerm.app
-          sleep 15
-      - run: node plugins/optimizer/test/smoke-window.mjs
-        timeout-minutes: 3
-        env:
-          SMOKE_EXPECT_TERM_PROGRAM: iTerm.app
 
   smoke-linux:
     name: window smoke (Linux, xterm)

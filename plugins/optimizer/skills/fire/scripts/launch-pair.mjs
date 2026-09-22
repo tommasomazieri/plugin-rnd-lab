@@ -41,8 +41,8 @@
  * The opening prompt is a fixed constant for parity across arms and across experiments.
  *
  * Terminal host and launcher dialect are both platform-specific and both live in
- * terminal.mjs: a generated .ps1 under Windows Terminal on win32, a generated .sh under
- * Terminal.app/iTerm2 on macOS, and under whichever emulator is installed on Linux. The
+ * terminal.mjs: a generated .ps1 under Windows Terminal on win32, a generated .command under
+ * Terminal.app on macOS, and a .sh under whichever emulator is installed on Linux. The
  * host is resolved ONCE and applied to both arms — two arms in two different terminals
  * would be a parity break in the most literal sense. Where no terminal can be opened
  * (headless, SSH, an unlisted emulator) the pair is staged and the operator is given the
