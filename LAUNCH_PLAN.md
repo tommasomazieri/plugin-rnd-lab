@@ -164,12 +164,30 @@ https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0
 
 The first version asked for opinions ("which would you reach for?", "what one change would make
 you use it again?", "was it worth it?") and the operator threw it out: a survey is an interview,
-and it follows Prospector's rule, behaviour over opinion. `launch/feedback-form.gs` now rebuilds
-the same form in place, same link: what they did, where they stopped and what they went back to,
-how each moment felt (grids), certainty before and after, what they did next. Scales and grids
-throughout, one optional open question about a single concrete moment, and a yes/no to a
-15-minute follow-up chat, which is where the real interviews come from. Only question 1, the
-funnel, is required. Rerun `rebuildFeedbackForm` after editing the questions; it keeps the link.
+and it follows Prospector's rule, behaviour over opinion. `launch/feedback-form.gs` rebuilds the
+same form in place, same link.
+
+The second version was still too thin ("too few questions… ALL ANGLES of what has been done, how
+has been done, and how it felt"). The third branches. Question 1, "What did you do with it?",
+routes each respondent to a section about what they actually did: only read it, install broke,
+installed and idle, `/core:learn` only, Prospector, Optimizer. Prospector users are then asked
+whether they also used Optimizer. Each path covers what they did, how they did it and how it felt,
+step by step, and the form never asks the two things it exists to learn:
+
+- **Does Prospector help develop a new plugin?** Read off: MVP built, times used on real work,
+  still installed, the problem came back and the MVP handled it, the survey sent them to an
+  existing tool, a real example ready versus a made-up one.
+- **Does Optimizer help optimize one?** Read off: real-work task, runs fired, what they did after
+  the report, whether the change came from the report or from what they saw themselves, certainty
+  before and after, their own call against the report's.
+- **Frustrated or happy?** Read off: feeling per step (grids), where they stopped and what was
+  going on, the most frustrating moment and its kind, the best moment, what they did when lost.
+
+Everyone ends on "About you" (usage, plugins written and installed, how they judged plugins
+before, OS, where they found it) and one optional open question plus the chat opt-in. Paths run
+15 to 64 questions, mostly clicks: about 2 minutes for someone who only read it, 6 for one
+tool, 10 for both. The key to reading the answers is in the script's header comment. Rerun
+`rebuildFeedbackForm` after editing the questions; it keeps the link.
 
 ### 3. The first real paired run
 

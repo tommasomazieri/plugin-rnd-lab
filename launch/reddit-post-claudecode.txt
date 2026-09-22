@@ -18,4 +18,4 @@ So this isn't a launch, it's a request for help. If you build or use plugins, tr
 
 Repo and install (free, MIT): https://github.com/tommasomazieri/plugin-rnd-lab
 
-How it went (about three minutes, mostly clicks): https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+How it went (mostly clicks, 2 to 10 minutes depending on how far you got): https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform

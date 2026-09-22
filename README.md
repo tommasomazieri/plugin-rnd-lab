@@ -37,7 +37,7 @@ hidden. Use both tools: `plugin eval` for regressions on every change, Optimizer
 plugin makes your real sessions better.
 
 **Tried it, or stopped halfway?** [Tell me how it went](https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform):
-about three minutes, mostly clicks.
+mostly clicks, 2 to 10 minutes depending on how far you got.
 
 ## The two instruments
 
