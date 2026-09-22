@@ -207,13 +207,32 @@ test('findPluginDirs: returns plugin ROOTS, not the .claude-plugin manifest fold
   assert.deepEqual(found, ['legacy', 'plugins/one', 'plugins/two']);
 });
 
+// Both arms pinning the same ref resolve it twice; the second must hit the cache. On Windows the
+// experiments root can reach the resolver spelled differently from how git prints it, and a raw
+// string compare refused the second arm outright. Re-casing the path reproduces that anywhere on
+// Windows; the first CI runner hit it through an 8.3 short name in TEMP.
+test('a cached worktree is recognised however its path is spelled', { skip: process.platform !== 'win32' && 'case-insensitive paths are a Windows property' }, () => {
+  const repo = makeRepo({ 'a.txt': 'a\n' });
+  tag(repo, 'v1.0');
+  const testenvRoot = tmpDir('optimizer-te-');
+  const artifact = { id: 'x', repo, deliver: 'none', delivery: { mode: 'none' } };
+  const first = resolveArtifact(artifact, 'v1.0', testenvRoot);
+  const second = resolveArtifact(artifact, 'v1.0', testenvRoot.toUpperCase());
+  assert.equal(first.resolved.cached, false);
+  assert.equal(second.resolved.cached, true, 'the same folder, spelled in capitals, is the same worktree');
+});
+
 test('git worktrees created by the resolver are registered against the source repo', () => {
   const repo = makeRepo({ 'a.txt': 'a\n' });
   tag(repo, 'v1.0');
   const testenvRoot = tmpDir('optimizer-te-');
   const pin = resolveArtifact({ id: 'x', repo, deliver: 'none', delivery: { mode: 'none' } }, 'v1.0', testenvRoot);
-  // git reports worktree paths with forward slashes even on Windows.
-  const norm = (p) => p.replace(/\\/g, '/').toLowerCase();
-  const listed = norm(git(repo, ['worktree', 'list', '--porcelain']));
+  // git reports worktree paths with forward slashes and long names even on Windows, where a
+  // TEMP-derived path can carry an 8.3 short name — so both sides go through realpath first.
+  const norm = (p) => fs.realpathSync.native(p).replace(/\\/g, '/').toLowerCase();
+  const listed = git(repo, ['worktree', 'list', '--porcelain'])
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => norm(l.slice('worktree '.length).trim()));
   assert.ok(listed.includes(norm(pin.resolved.path)), 'the checkout is a real registered worktree, not a stray copy');
 });

@@ -163,11 +163,27 @@ function copyWorkingTree(repo, dest) {
   }
 }
 
+/**
+ * One spelling per directory, so a path we built and a path git printed can be compared.
+ *
+ * They are routinely different strings for the same folder. On Windows git prints the long,
+ * correctly-cased form (`C:/Users/runneradmin/...`) while a path assembled from TEMP or typed by
+ * the operator may carry an 8.3 short name (`C:\Users\RUNNER~1\...`) or other casing; on macOS
+ * one side may go through the /var -> /private/var symlink. Compared raw, the resolver took its
+ * own worktree for a stranger's folder and refused the second arm pinning the same ref — every
+ * run that held an artifact fixed across arms. Found by the first Windows CI run.
+ */
+function canonicalPath(p) {
+  let out;
+  try { out = fs.realpathSync.native(p); } catch { out = path.resolve(p); }
+  return process.platform === 'win32' ? out.toLowerCase() : out;
+}
+
 function listWorktrees(repo) {
   const out = git(repo, ['worktree', 'list', '--porcelain']);
   const paths = [];
   for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) paths.push(path.resolve(line.slice('worktree '.length).trim()));
+    if (line.startsWith('worktree ')) paths.push(canonicalPath(line.slice('worktree '.length).trim()));
   }
   return paths;
 }
@@ -179,7 +195,7 @@ function ensureWorktree(repo, ref, worktreePath) {
   if (String(ref).startsWith('-')) {
     throw new Error(`ref "${ref}" starts with "-" — git would read it as an option, not a revision`);
   }
-  if (listWorktrees(repo).includes(path.resolve(worktreePath))) return { cached: true };
+  if (listWorktrees(repo).includes(canonicalPath(worktreePath))) return { cached: true };
   if (fs.existsSync(worktreePath)) {
     if (fs.readdirSync(worktreePath).length > 0) {
       throw new Error(
