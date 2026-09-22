@@ -27,6 +27,26 @@ and runs the real launcher and probe inside it.
 - A pinned ref that began with `-` reached `git worktree add` as an option. Git allows no such
   ref name, so they are refused.
 
+### CI on three platforms, with real terminal windows
+
+`.github/workflows/ci.yml` runs every suite on Windows, macOS and Linux, and
+`test/smoke-window.mjs` opens a real window through the real launcher on macOS (Terminal.app)
+and Linux (xterm), with a stub `claude` that records the workspace, env and argv it arrived
+with. Its first runs found three defects, all fixed, and retired one path:
+
+- **macOS arm windows needed a permission prompt.** They were opened with AppleScript, which
+  needs the user's Automation consent: the first `/optimizer:fire` on a Mac stopped on a system
+  dialog, and "Don't Allow" broke every later run. The launcher is now handed over with
+  `open -a`, which needs no consent, and is named `.command`, the type Terminal.app runs.
+- **iTerm2 is no longer used for arm windows.** Handed the launcher with `open -a`, iTerm2
+  reported success and never ran it: no window ran the arm within 90 seconds. In a real run that
+  is a manifest saying "launched" over an arm that never started. Its only other route is the
+  AppleScript that needed consent. Arms now always open in Terminal.app on macOS, the path CI
+  proves; `OPTIMIZER_TERMINAL` still overrides.
+- **Windows: a cached worktree was not recognised when its path was spelled differently** from
+  how git prints it (an 8.3 short name, other casing), so the second arm pinning the same ref
+  was refused. Paths are now compared after realpath, case-insensitively on Windows.
+
 ### Install instructions point at GitHub, over HTTPS
 
 The README described a local clone. It now leads with the public repo, and uses the HTTPS URL

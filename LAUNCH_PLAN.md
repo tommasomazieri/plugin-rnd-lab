@@ -31,6 +31,31 @@ later, links and member counts drift):
 - `r/ClaudeCode` (387k members, community-run, not Anthropic-official) and `r/ClaudeAI` (1.1M
   members, same caveat).
 
+Re-verified 2026-09-22 — what changed the plan:
+- **Anthropic shipped `claude plugin eval`** (Claude Code v2.1.269, ~2026-09-11,
+  code.claude.com/docs/en/plugin-evals): with/without-plugin runs, 3 per case by default,
+  regex/tool/LLM graders, CI gating. Each run is "a fresh, isolated non-interactive session" in
+  "an empty working directory" with one prompt. It is the first thing any commenter will raise.
+  Optimizer's honest distinction: interactive, human-in-the-loop, real multi-turn work — the
+  plugins whose value only appears in a conversation. Its honest cost: one paired run is one data
+  point, with the operator in it. Both now lead the README.
+- **Show HN does not take writeups** ("blog posts… and other reading material" are off topic,
+  news.ycombinator.com/showhn.html). A findings post is a regular submission; Show HN is for the
+  repo itself, and only once a stranger can install and run it.
+- **Demand exists and is documented.** r/ClaudeCode 2026-04-22 "Has anyone actually benchmarked
+  whether superpowers improves performance?"; r/ClaudeAI 2026-04-15 "Has anyone actually run
+  controlled A/B tests on Claude skills and prompt plugins?". A 12-session headless review of
+  superpowers (mejba.me, 2026-04-14) concedes its protocol "bypassed the framework's best
+  feature", the human-in-the-loop moments.
+- **What gets upvoted.** Tool authors posting their own benchmarks: 1 point (Ouroboros, r/ClaudeAI)
+  and 5 points (Nelson, r/ClaudeCode, opened with "v2.2.3 shipped"). An experience post about the
+  plugin people already use, "Claude Code's Superpowers plugin actually delivers": 171 points,
+  54 comments. People upvote the plugin they use, not the tool that measured it.
+- Reddit blocks automated fetches of subreddit rules; they were not read. Read both sidebars by
+  hand before posting.
+- **Always-on context cost**, from `claude plugin details` on a GitHub install: optimizer ~1554
+  tokens per session, prospector ~1076, core ~115, dod-lite 0. Someone will ask.
+
 ## Before anything goes public: finish the audit
 
 The fast pass above is not sufficient. Before submitting anywhere or posting anything, do a
@@ -81,44 +106,118 @@ unresolved defect.
   the window-opening layer: `osascript` against Terminal.app and iTerm2, and each Linux
   emulator's argument spelling. First run on either platform should be treated as a smoke test.
 
+**2026-09-22 — the pre-launch pass. Items 1 and 3 closed; the stranger path was broken.**
+
+- **The public repo showed the old product.** GitHub's default branch `master` sat at `d113a81`
+  (2026-08-02): ab-bench only, Windows only, no Prospector, no `core`. Every commit since lived on
+  `feat/observational-dod-and-prospector`. Fast-forwarded `master`; repo description rewritten to
+  name both instruments. Work now lands on `master` once CI is green.
+- **Item 1, security review — closed.** Every subprocess, shell and path sink read by hand. Two
+  fixes, `061c553`: PowerShell literals now escape the typographic quotes `‘ ’ ‚ ‛` (verified on
+  a real parser: an experiment name with a curly apostrophe broke the Windows launcher and could
+  inject); refs starting with `-` refused before `git worktree add`. Reviewed and sound: the
+  `prepare` shell command is the operator's own and shown in the parity preflight before launch;
+  dod-lite runs nothing without a session file keyed to Claude Code's random session id, so a
+  cloned repo cannot pre-plant checks; the SessionStart hook's injected text is no wider a channel
+  than any repo's own CLAUDE.md.
+- **Item 3, stranger dry run — closed, and it found the launch blocker.** Installed from the
+  public repo into an isolated `CLAUDE_CONFIG_DIR`. Three findings, all fixed in `17b3ca2`:
+  1. **Optimizer could not run at all from a GitHub install.** Local marketplaces load in place;
+     GitHub ones copy each plugin into a versioned cache folder, and optimizer only looked for
+     dod-lite as a plain sibling. `fire` refused to launch, `plan`'s probe crashed on import.
+     Nobody but the author had ever installed it, and the author's install is local.
+  2. The `owner/repo` shorthand clones over SSH and fails without a GitHub SSH key. README now
+     gives the HTTPS URL.
+  3. `claude plugin install` from a shell does not prompt for `experiments_root`. README now
+     gives `--config experiments_root=<folder>` and `/optimizer:setup`.
+  Re-run after the fix against the live repo: all four plugins install, `plugin update` delivers
+  0.8.1, and both scripts get past dod-lite from the cached copy.
+- **CI added** (`.github/workflows/ci.yml`): all suites on Windows, macOS and Linux, plus
+  `test/smoke-window.mjs`, which opens a real terminal window through the real launcher with a
+  stub `claude` that records the cwd, env and argv it arrived with. The first runs found two more
+  defects, both fixed: a Windows path compare that broke whenever the experiments root was
+  spelled differently from git's output (8.3 short names, casing), and the macOS launch using
+  AppleScript, which needs Automation consent and hung without it. macOS now uses
+  `open -a Terminal`, **verified in CI: a real Terminal.app window ran the arm with its cwd,
+  env and argv intact.** Linux: **verified with xterm** under Xvfb. iTerm2 was dropped: handed a
+  file with `open -a` it reported success and never ran it, which in a real run is a silent
+  non-launch. Still unexercised: GNOME Terminal, Konsole and the other Linux emulators, and any
+  Mac that is not a CI VM. First real use on those is still a smoke test.
+
 ## The plan
 
-### 1. Sharpen the hook
+**Decided by the operator, 2026-09-22: launch as a demo that asks for help, not as a showcase.**
+The message: built this a couple of months ago (first commit 2026-07-12); Claude Code now ships
+its own `plugin eval`, which does not cover the interactive case; here it is, try it, tell me
+where it breaks, help make it better. Feedback comes in through a form, so it is structured and
+collected in one place instead of scattered through comment threads.
 
-Rewrite the opening of `README.md`. It currently leads with marketplace mechanics (two
-instruments, a table). Lead with the pain instead, one sentence, before any of that:
-"Does your Claude Code plugin actually help, or does it just feel that way?" Keep everything
-else in the README as is, it's accurate and thorough, it just doesn't front-load the hook.
+### 1. Sharpen the hook — DONE 2026-09-22 (`17b3ca2`)
 
-### 2. List it
+README opens with the question, then a plain comparison with `claude plugin eval`: what it does
+well, what Optimizer adds, and what Optimizer costs.
+
+### 2. The feedback form
+
+`launch/feedback-form.gs` builds a Google Form plus a response Sheet in one run (instructions at
+the top of the file). Question 1, the only required one, is the funnel ("how far did you get?")
+and is answerable by someone who only read the post, so the drop-off point shows up even from
+people who never install. Once the form exists, link it from the post and from the README.
+
+### 3. The first real paired run
+
+A demo with nothing to look at is an announcement. The post needs one real output: a real
+`report.md` and a screenshot of the two arm windows side by side. This needs the operator in the
+chair, working both arms. That is the method, and it is not something to delegate.
+
+Recommended target: **superpowers** (`superpowers@claude-plugins-official`), the plugin both April
+threads asked about. It is interactive (brainstorming, plan review), which is exactly the case
+`plugin eval` cannot reach.
+
+    claude plugin install superpowers@claude-plugins-official
+    claude plugin disable superpowers@claude-plugins-official
+
+(Installed so an arm can enable it; disabled so it stays out of every other session. Optimizer
+enables it in the test arm only.) Then `/core:learn optimizer`, `/optimizer:setup`,
+`/optimizer:init`, which interviews you for the rest, `/optimizer:plan`, `/optimizer:fire`,
+work both arms on a task from your real work, and `/optimizer:analyze`. Whatever the report says
+is what gets shown.
+
+### 4. The launch post
+
+- **Complement, not rival.** Say what `plugin eval` does well, then the gap. "Better than
+  Anthropic's" from a solo developer draws the wrong thread.
+- **Show the real output** from step 3.
+- **State the cost up front:** two sessions of tokens plus your time per run, and the always-on
+  token figures above.
+- **Offer a cheap way in:** `/core:learn` takes minutes; Prospector works without Optimizer.
+- **Two links only:** the repo and the form.
+- **Channels:** `r/ClaudeCode` first. `r/ClaudeAI` a few days later with a different angle, not a
+  crosspost. Show HN is legitimate for the repo itself now that a stranger can install and run it.
+  Read each subreddit's rules by hand first.
+- Be in the thread for the first hours; the form catches everything after.
+
+### 5. List it
 
 - Submit via `clau.de/plugin-directory-submission` (official Anthropic form).
 - Check `claude-plugins-community`'s eligibility criteria and submit if eligible.
 - Create a listing on `claudemarketplaces.com`.
 
-### 3. Prove it, don't announce it
+### 6. Later: the findings post
 
-This is the actual distribution lever, not steps 1-2. Run Optimizer as a real A/B test
-against one or two other public, well-known Claude Code plugins (or against Prospector
-itself, dogfooding counts and is honest). Write up the resulting evidence-backed report as a
-public post: "I ran a controlled A/B test on plugin X, here's the evidence on whether it
-actually helps." Lead with the finding, whatever it turns out to be, not with the tool that
-produced it. A negative or mixed finding is fine content, do not massage the result toward a
-better story.
+Once there is a real run, its finding is a post of its own: lead with the plugin people already
+use and what happened with a human in the loop, with the tool mentioned last. The upvote data
+above says this is the format that travels. A negative or mixed finding is fine content; do not
+massage it toward a better story.
 
-### 4. Distribute the findings post
-
-Post the step-3 writeup (not a launch announcement) to Show HN, `r/ClaudeCode`, and
-X/dev-Twitter.
-
-### 5. Track real numbers only
+### 7. Track real numbers only
 
 GitHub stars, install signals if visible, directory submission approval/rejection, post
 upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
 
 ## Definition of done
 
-- Steps 1-4 executed.
+- Steps 1-5 executed (step 6, the findings post, when a real run gives it something to say).
 - The Log section below has a dated entry for everything actually submitted or posted, and
   what came back.
 - After roughly 3-4 weeks: one honest paragraph, written from the Log, usable as a CV bullet
