@@ -1,0 +1,75 @@
+# Every suite on every platform the harness claims, plus real terminal windows on the two
+# platforms the author does not use. The window-opening layer (osascript -> Terminal.app/iTerm2,
+# each Linux emulator's argv) cannot be unit-tested; it is proven only by opening a window,
+# which is what the smoke jobs do. See plugins/optimizer/test/smoke-window.mjs.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Several suites build real git repos and commit into them.
+      - run: git config --global user.name ci && git config --global user.email ci@example.invalid
+      - name: prospector
+        working-directory: plugins/prospector
+        run: node --test test/*.test.mjs
+      - name: optimizer
+        working-directory: plugins/optimizer
+        run: node --test test/*.test.mjs
+      - name: dod-lite
+        working-directory: plugins/dod-lite
+        run: node --test test/*.test.mjs
+
+  smoke-terminal-app:
+    name: window smoke (macOS, Terminal.app)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node plugins/optimizer/test/smoke-window.mjs
+        env:
+          SMOKE_EXPECT_TERM_PROGRAM: Apple_Terminal
+
+  smoke-iterm:
+    name: window smoke (macOS, iTerm2)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: brew install --cask iterm2
+      - run: node plugins/optimizer/test/smoke-window.mjs
+        env:
+          SMOKE_EXPECT_TERM_PROGRAM: iTerm.app
+
+  smoke-linux:
+    name: window smoke (Linux, xterm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y xterm xvfb
+      - run: xvfb-run -a node plugins/optimizer/test/smoke-window.mjs
