@@ -17,7 +17,6 @@ import { spawnSync } from 'node:child_process';
 import {
   psQuote,
   shQuote,
-  osaQuote,
   findOnPath,
   launchScriptExt,
   buildLaunchScript,
@@ -74,14 +73,6 @@ test('a PowerShell literal round-trips every quote character through a real pars
   }
 });
 
-test('AppleScript quoting escapes backslash before quote, not after', () => {
-  assert.equal(osaQuote('/Users/me/exp'), '"/Users/me/exp"');
-  assert.equal(osaQuote('a"b'), '"a\\"b"');
-  // Order matters: escaping the quote first would then double-escape its own backslash.
-  assert.equal(osaQuote('a\\b'), '"a\\\\b"');
-  assert.equal(osaQuote('a\\"b'), '"a\\\\\\"b"');
-});
-
 /* -------------------------------------------------------------------- PATH probing */
 
 test('findOnPath resolves a real executable and refuses an invented one', () => {
@@ -133,9 +124,11 @@ test('the two dialects do not leak into each other', () => {
   assert.ok(!/^#!/.test(ps), 'a .ps1 must not carry a shebang');
   assert.ok(!/\bexport \w+=/.test(ps), 'no sh export syntax in PowerShell');
 
+  // Same sh script on both; macOS names it .command because that is what Terminal.app runs on `open`.
+  assert.equal(launchScriptExt('darwin'), '.command');
+  assert.equal(launchScriptExt('linux'), '.sh');
   for (const platform of ['darwin', 'linux']) {
     const sh = buildLaunchScript({ ...SAMPLE, workspace: '/exp/ws', platform });
-    assert.equal(launchScriptExt(platform), '.sh');
     assert.match(sh, /^#!\/bin\/sh$/m);
     assert.match(sh, /^set -- .+$/m);
     assert.match(sh, /^claude "\$@"$/m);

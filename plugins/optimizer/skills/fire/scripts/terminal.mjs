@@ -15,7 +15,7 @@
  * Three script dialects, one contract — cd to the workspace, export the arm's env,
  * force colour on, set the window title, exec claude with argv preserved exactly:
  *   win32          PowerShell (.ps1), args via array + splat
- *   darwin/linux   POSIX sh (.sh), args via `set --` + "$@"
+ *   darwin/linux   POSIX sh (.command on macOS, .sh on Linux), args via `set --` + "$@"
  */
 
 import fs from 'node:fs';
@@ -78,11 +78,6 @@ export function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-/** An AppleScript string literal: only backslash and double-quote are special. */
-export function osaQuote(value) {
-  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
-
 /**
  * The extension the generated arm launcher must carry.
  *
@@ -91,7 +86,10 @@ export function osaQuote(value) {
  * one most likely to be wrong, so both must be assertable from either.
  */
 export function launchScriptExt(platform = process.platform) {
-  return platform === 'win32' ? '.ps1' : '.sh';
+  // `.command` on macOS is the same POSIX sh script under the name Terminal.app runs on open —
+  // which is how spawnMacTerminal hands it over (see there for why not AppleScript).
+  if (platform === 'win32') return '.ps1';
+  return platform === 'darwin' ? '.command' : '.sh';
 }
 
 /* ------------------------------------------------------- launcher script body */
@@ -210,8 +208,8 @@ export function resolveTerminalHost(env = process.env) {
   if (IS_MAC) {
     // iTerm2 first where it exists — it is the deliberate install, so it is the one the
     // operator is set up to read. Terminal.app is on every Mac and needs no probe.
-    if (fs.existsSync('/Applications/iTerm.app')) return { id: 'iterm', bin: 'osascript', label: 'iTerm2' };
-    return { id: 'terminal-app', bin: 'osascript', label: 'Terminal.app' };
+    if (fs.existsSync('/Applications/iTerm.app')) return { id: 'iterm', bin: 'open', label: 'iTerm2' };
+    return { id: 'terminal-app', bin: 'open', label: 'Terminal.app' };
   }
 
   // Linux and the other unixes. A GUI terminal needs a display server; without one this
@@ -245,7 +243,7 @@ const LINUX_TERMINALS = [
  * Open `scriptFile` in a new window of `host`, detached from this process.
  *
  * Returns the spawned pid, or null when the window was opened by an agent that does not
- * hand one back (osascript asks the terminal app to open a window; the pid of osascript
+ * hand one back (`open` asks the terminal app to open a window; the pid of `open`
  * itself is meaningless once it exits). A null pid is recorded as-is rather than faked —
  * it is the honest answer to "which process is this arm", and nothing downstream needs it.
  */
@@ -296,37 +294,34 @@ function spawnWindowsTerminal({ title, scriptFile, host }) {
   return child.pid ?? null;
 }
 
+/**
+ * Hand the launcher to the terminal app with `open -a`, which goes through LaunchServices.
+ *
+ * This used to be AppleScript (`tell application "Terminal" to do script …`). Sending Apple
+ * Events to another app needs the user's Automation consent, so the first `/optimizer:fire` on a
+ * Mac stopped on a system dialog mid-launch, and a "Don't Allow" broke every later run until it
+ * was undone in System Settings. On a machine nobody sits at, the consent prompt just hangs:
+ * the first macOS CI run died on `AppleEvent timed out (-1712)`, which is what exposed it.
+ * `open` needs no consent, the argv goes in as an argv, and there is no second quoting layer.
+ *
+ * The file is a `.command` (see launchScriptExt) because that is the type Terminal.app executes
+ * when it opens one. `open` returns once the app has the file, so the manifest records a null
+ * pid — the honest answer, as before.
+ */
 function spawnMacTerminal({ title, scriptFile, host }) {
   if (host.id === 'custom') return detached(host.bin, [scriptFile]);
 
-  // The script path reaches the terminal app as a *shell command*, so it is sh-quoted
-  // first and AppleScript-quoted second. A Mac experiments root under ~/Documents or an
-  // iCloud folder has spaces in it far more often than not.
-  const command = shQuote(scriptFile);
+  const openWith = (app) => spawnSync('open', ['-a', app, scriptFile], { encoding: 'utf8' });
 
   if (host.id === 'iterm') {
-    const script = [
-      'tell application "iTerm"',
-      '  create window with default profile',
-      `  tell current session of current window to write text ${osaQuote(command)}`,
-      '  activate',
-      'end tell',
-    ].join('\n');
-    // Run this one synchronously: iTerm2's scripting interface has changed across major
-    // versions, and a silent AppleScript error would leave the operator with a manifest
-    // claiming an arm launched and no window anywhere. Terminal.app is on every Mac, so
-    // there is always somewhere to fall back to.
-    const r = spawnSync('osascript', ['-e', script], { encoding: 'utf8' });
+    const r = openWith('iTerm');
     if (r.status === 0) return null;
-    console.error(`[optimizer] NOTE: iTerm2 refused the launch (${(r.stderr || '').trim() || 'no message'}) — using Terminal.app.`);
+    // Terminal.app is on every Mac, so there is always somewhere to fall back to.
+    console.error(`[optimizer] NOTE: iTerm2 refused the launch (${(r.stderr || '').trim() || `exit ${r.status}`}) — using Terminal.app.`);
   }
 
-  const script = [
-    `tell application "Terminal" to do script ${osaQuote(command)}`,
-    'tell application "Terminal" to activate',
-  ].join('\n');
-  const r = spawnSync('osascript', ['-e', script], { encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(`osascript could not open Terminal.app: ${(r.stderr || '').trim() || `exit ${r.status}`}`);
+  const r = openWith('Terminal');
+  if (r.status !== 0) throw new Error(`open could not start Terminal.app: ${(r.stderr || '').trim() || `exit ${r.status}`}`);
   return null;
 }
 
