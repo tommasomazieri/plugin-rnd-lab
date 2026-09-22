@@ -239,9 +239,30 @@ reading the thread afterwards, not writing to it.
 
 ### 5. List it
 
-- Submit via `clau.de/plugin-directory-submission` (official Anthropic form).
-- Check `claude-plugins-community`'s eligibility criteria and submit if eligible.
-- Create a listing on `claudemarketplaces.com`.
+Re-checked 2026-09-22 against each channel's own page:
+
+- **Anthropic's community marketplace (`claude-community`)** is the directory: `clau.de/plugin-
+  directory-submission` and `anthropics/claude-plugins-community` are the same pipeline, not two
+  steps. Individual authors submit through the Console form, `platform.claude.com/plugins/submit`
+  (the claude.ai form needs a Team or Enterprise org). Each plugin is submitted, reviewed and
+  installed on its own, then pinned to a commit SHA that CI bumps as the repo moves. The
+  pipeline runs `claude plugin validate` plus automated safety screening; all four plugins and
+  the marketplace pass `--strict`. Submit all four in one sitting: optimizer now declares
+  dod-lite as a dependency (0.8.3, `d16e509`), so optimizer cannot install from `claude-community`
+  until dod-lite is approved there too. Needs the operator's Console login.
+- **`claude-plugins-official`** has no application process; Anthropic picks at its discretion.
+- **`claudemarketplaces.com` takes no submissions.** Its crawlers discover "GitHub repositories
+  with valid marketplace schemas", and an editor reviews new listings. Not listed as of
+  2026-09-22. The repo had no GitHub topics; eight were added (`claude-code`,
+  `claude-code-plugin`, `claude-code-plugins`, `claude-code-marketplace`, `claude-code-skills`,
+  `ab-testing`, `llm-evaluation`, `plugin-development`). Contact, if it stays unlisted:
+  hi@claudemarketplaces.com.
+- **`hesreallyhim/awesome-claude-code`**: the repo passes the 14-days-and-active rule, but the
+  maintainer says outright that the likely order is build, get users, then submit, and that a
+  listing should not be a promotion strategy. Later, once there are users.
+- **Show HN is closed to new HN accounts** ("temporarily restricting Show HNs because of a massive
+  influx… Take some time to get to know the community", news.ycombinator.com/showlim, since
+  2026-06). Same shape as the r/ClaudeCode gate.
 
 ### 6. Later: the findings post
 
@@ -286,3 +307,7 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   the minimum age or karma requirements for posting in r/claudecode." The thresholds are not
   published (not in the sidebar rules, not in the message, not findable on the web). Lesson for
   the case study: check the posting account against the sub's gates before launch day.
+- 2026-09-22: prepared the community-directory submission (optimizer 0.8.3 declares dod-lite;
+  verified from GitHub into a clean config: "+ 1 dependency: dod-lite"). Added eight GitHub
+  topics for crawler and topic-page discovery. Submission itself pending the operator's Console
+  login.
