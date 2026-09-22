@@ -327,3 +327,9 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
   JavaScript). An ad is not a post in the sub, so its karma filter should not apply: inferred,
   not stated anywhere I read. anthropics/claude-code
   has GitHub Discussions switched off, so there is no show-and-tell there.
+- 2026-09-23: measured the r/ClaudeCode weekly showcase thread (`1wma6ma`, stickied, posted by
+  AutoModerator on 2026-09-21): 33 comments in its first day and a half, 3 removed or deleted.
+  Of the 24 people whose comments survived, 5 had under 30 days of archived Reddit history and
+  one had a single day, so the account gate that removes posts does not apply to comments there.
+  People do share plugins in it. Draft comment: `launch/reddit-showcase-comment.txt`, written to
+  rule 5 (how Claude Code was used, what was learned).

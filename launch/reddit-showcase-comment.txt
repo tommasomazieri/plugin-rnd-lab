@@ -1,0 +1,11 @@
+I built two Claude Code plugins for a question I kept failing to answer about my own work: does a plugin I wrote actually help, or does it only feel that way?
+
+Optimizer opens two paired Claude Code sessions on the same task, one with the plugin and one without, same model, same seed files, same opening prompt, and you work both of them like normal work. Definition-of-Done checks are written before either session starts. At the end it merges both transcripts, the check results and your own verdict into one report covering quality, tokens, turns and autonomy. Any prompt you type into one session and not the other is recorded as a bias indicator instead of quietly ignored.
+
+Prospector is the other half, for before you build: it interviews you about what you actually did rather than what you want, searches for something that already solves it, and ships narrow MVPs you use on real work until a direction holds.
+
+Two things I learned building them with Claude Code. First, my own install hid my own bugs: I develop against a local-directory marketplace, which loads plugins in place, while a GitHub install copies every plugin into its own versioned cache folder, and in that layout my plugin could not find its companion plugin at all. I only found it by installing from the public repo into a clean CLAUDE_CONFIG_DIR the way a stranger would, before telling anyone it existed. Second, this complements claude plugin eval rather than competing with it: eval is headless and grades one prompt per case, which is the right tool for skills that should trigger and finish on one request. Mine is for plugins whose value only shows up in a long conversation with a person in it, and the price is sample size, one paired run at a time with you inside the experiment.
+
+Free, MIT, Windows, macOS and Linux: https://github.com/tommasomazieri/plugin-rnd-lab
+
+It is early and I would rather have it torn apart than praised. There is a feedback form linked in the README, mostly clicks, and it takes stopping halfway as a real answer.
