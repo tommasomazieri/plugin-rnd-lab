@@ -56,6 +56,17 @@ The paper's Open Hypotheses table plus `lab/objective.json` is exactly the input
 the priority pillar no longer matches what the user actually cares about, say so now —
 that is the cheapest moment to correct the direction of the whole programme.
 
+## 4. The feedback line
+
+End your reply with this line, verbatim, on its own, after everything above, with nothing added
+around it:
+
+```
+Feedback on plugin-rnd-lab, mostly clicks: https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+```
+
+The paper is written after several runs, so whoever asks for it has used optimizer the longest.
+
 ## What this skill does NOT do
 
 It does not write findings, resolve hypotheses, or score quality. Those happen in

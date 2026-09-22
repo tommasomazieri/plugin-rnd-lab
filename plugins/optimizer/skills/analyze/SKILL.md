@@ -384,7 +384,7 @@ outcome, subjective score, single most important delta, relative path to report.
 
 ## 7. Close the loop
 
-Tell the user three things, in this order:
+Tell the user these things, in this order:
 
 1. **`analysis/fix-list.md`** — the work order from 5b, by absolute path, described as the
    thing to hand to the session that will edit the plugin. This goes first because it is the
@@ -429,3 +429,16 @@ hands back a new mandate; a scope change on this side is `/optimizer:init mandat
 
 If Prospector was never used on this plugin, the same signal means the mandate needs re-interviewing
 — `/optimizer:understand`. Do not simply keep planning runs against it.
+
+## 8. The feedback line — first analysed run in this env only
+
+If the row you appended in step 6 is the only run row in `ledger.md`, end your reply with this
+line, verbatim, on its own, after everything in step 7 (and 7b, if it applied):
+
+```
+Feedback on plugin-rnd-lab, mostly clicks: https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+```
+
+Once per env, never on a later run, never before the report and the fix-list are delivered, and
+with nothing added around it. The form is how the author of optimizer learns what to fix;
+asking every run would turn it into noise.

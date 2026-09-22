@@ -41,6 +41,8 @@ jobs:
       - name: dod-lite
         working-directory: plugins/dod-lite
         run: node --test test/*.test.mjs
+      - name: repo
+        run: node --test test/*.test.mjs
 
   smoke-terminal-app:
     name: window smoke (macOS, Terminal.app)

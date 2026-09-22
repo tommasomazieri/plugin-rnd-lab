@@ -2,7 +2,7 @@
   "name": "prospector",
   "displayName": "Prospector",
   "description": "Discovery-stage counterpart to the Optimizer. Starts from ambiguity rather than a spec: interviews for evidence instead of accepting the stated issue, surveys existing solutions before designing (and can end an engagement with \"this already exists\"), maintains a living problem model, keeps competing problem framings alive, and enumerates every need the user states as a machine-checkable denominator. Designs the whole plugin before building any of it, then ships MVPs that are shallow on purpose but never narrow — a package cannot be cut while a core stated need is neither covered nor deferred with a written reason. Optimises for effectiveness, hands a validated direction to the Optimizer, and re-enters afterwards to scope the next version from the A/B evidence.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Tommaso Mazieri"
   },

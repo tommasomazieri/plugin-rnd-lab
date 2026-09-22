@@ -81,3 +81,11 @@ set, otherwise cd into the plugin's own repo and `/optimizer:init`.
 **A plugin exists, has been through the Optimizer, and the question is what's still missing** →
 `/prospector:reenter` in the plugin's own repo. This is the loop closing, and it is the case
 people miss: Prospector is not only for starting from nothing.
+
+When this closes a walkthrough (one plugin stage by stage, or the full tour), put this line under
+the next command, verbatim, on its own, once, with nothing added around it. Not after a
+free-form answer:
+
+```
+Feedback on plugin-rnd-lab, mostly clicks: https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+```

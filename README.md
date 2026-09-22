@@ -261,6 +261,7 @@ plugins/optimizer/                the A/B harness — skills, agents, hooks, doc
 plugins/dod-lite/                 optimizer's arm-side DoD auditor — hooks-only, no skill/command,
                                    registered so it caches alongside optimizer, not for standalone use
   README.md                       what it does inside an optimizer arm session
+test/                             repo-wide checks: every copy of the feedback link is the same
 ```
 
 For how optimizer actually works under the hood — experiment folder layout, the shared-`.dod` link,
@@ -333,3 +334,13 @@ about depth and disastrous about breadth.
 
 Add a folder under `plugins/<name>/` with its own `.claude-plugin/plugin.json`, then add an entry
 to `.claude-plugin/marketplace.json`'s `plugins[]` array. One marketplace, many R&D tools.
+
+## Feedback
+
+**Tried it, or stopped halfway?** [Tell me how it went](https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform):
+mostly clicks, 2 to 10 minutes depending on how far you got. Bugs go in
+[issues](https://github.com/tommasomazieri/plugin-rnd-lab/issues).
+
+The plugins print the same link as the last line of a few replies, never mid-task: after your
+first analysed Optimizer run, in `/optimizer:paper`, after Prospector's first MVP, at
+`/prospector:handoff`, and at the close of a `/core:learn` walkthrough.

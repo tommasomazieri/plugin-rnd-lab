@@ -224,6 +224,17 @@ was worse than v1" means something because v2 cannot have changed underneath the
 Tell them plainly: **use it for real, and notice when it annoys you.** Then come back to
 `/prospector:review`.
 
+**On the first build only (package v1)**, end your reply with this line, verbatim, on its own,
+after the install commands and the sentence above, with nothing added around it:
+
+```
+Feedback on plugin-rnd-lab, mostly clicks: https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+```
+
+A first MVP in their hands is as far as many people take Prospector, and the form is how its
+author learns what the interview, survey, framing and design stages were like. Never on v2 or
+later: `/prospector:handoff` carries it once more at the end.
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/lib/prospector-cli.mjs" stage "<cwd>" --to review
 ```

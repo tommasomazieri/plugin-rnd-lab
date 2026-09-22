@@ -114,6 +114,13 @@ complexity**, and let them correct anything that reads wrong. From there the Opt
 over: it makes the execution of this direction efficient, and it must never redefine the problem
 — if it finds a contradiction or a missing requirement, it sends the work back here.
 
+End your reply with this line, verbatim, on its own, below the next step, with nothing added
+around it:
+
+```
+Feedback on plugin-rnd-lab, mostly clicks: https://docs.google.com/forms/d/e/1FAIpQLSfINKyrAFuydl9SC-wNGceL_I-04cWqy7BkeQf0IJSwOKxFfg/viewform
+```
+
 Record the transition and commit:
 
 ```bash

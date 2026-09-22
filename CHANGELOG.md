@@ -1,5 +1,20 @@
 # Changelog
 
+## A way back to the author: the feedback link, where a stretch of work ends
+
+**`optimizer` 0.8.3 → 0.8.4, `prospector` 0.5.0 → 0.5.1, `core` 0.1.1 → 0.1.2.** Skill text only;
+no script changed.
+
+- **Five replies now end with one line linking the feedback form**:
+  `/optimizer:analyze` on the first analysed run in an env, `/optimizer:paper`, `/prospector:build`
+  on package v1, `/prospector:handoff`, and `/core:learn` at the close of a walkthrough (not after a
+  free-form answer). Always the last line, after the report or next step, never mid-task, never
+  reworded. A second analysed run, a v2 MVP or a quick `/core:learn` question does not print it.
+- **GitHub's New issue page offers the form** next to a blank issue
+  (`.github/ISSUE_TEMPLATE/config.yml`), and the README closes with a Feedback section.
+- **`test/feedback-link.test.mjs`**, run in CI as the `repo` step: every Google Forms link in the
+  repo must match the README's, and each of the five skills must carry the line verbatim.
+
 ## Ready for the community directory: optimizer installs its own instrument
 
 **`optimizer` 0.8.2 → 0.8.3, `core` 0.1.0 → 0.1.1.** Prepared for Anthropic's community
