@@ -271,3 +271,14 @@ upvotes/comments, inbound DMs or issues. Log them below as they happen, dated.
 - 2026-08-27: submitted to clau.de/plugin-directory-submission, pending review.
 - 2026-08-29: posted A/B findings on plugin X to r/ClaudeCode, 12 upvotes, 3 comments.
 -->
+
+- 2026-09-22 15:01 UTC: posted `launch/reddit-post-claudecode.txt` to r/ClaudeCode, flair "Built
+  with Claude" (post `1wnbx12`). Removed by a moderator within the minute, before AutoModerator's
+  standard welcome comment appeared, so almost certainly an AutoModerator rule rather than a human.
+  Posted from u/ActiveTaste8720; the arctic-shift archive holds no other post or comment from that
+  account, so it looked brand new to the sub. Context from the same archive (200 posts,
+  2026-09-20 20:20 to 2026-09-22 15:01 UTC): 10 of 33 "Built with Claude" posts were removed,
+  the highest rate of any flair. The sidebar's rule 5 sends simple project sharing to the weekly
+  showcase thread and requires a standalone post to explain how Claude Code was used and what you
+  learned; the draft did neither. Next: read the removal reason in the inbox, ask the mods, and
+  do not repost the same text.
