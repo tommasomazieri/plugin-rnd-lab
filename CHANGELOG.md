@@ -2,8 +2,10 @@
 
 ## The install-from-GitHub release — the first install nobody but the author had done
 
-**`optimizer` 0.8.0 → 0.8.1.** Found by installing the marketplace from the public repo into an
-isolated `CLAUDE_CONFIG_DIR`, exactly as a stranger would, before telling anyone it exists.
+**`optimizer` 0.8.0 → 0.8.2.** Found by installing the marketplace from the public repo into an
+isolated `CLAUDE_CONFIG_DIR`, exactly as a stranger would, before telling anyone it exists, and
+by CI's first runs on three platforms. (0.8.1 was on `master` for part of 2026-09-22 with the
+dod-lite and security fixes only; 0.8.2 adds everything under "CI on three platforms".)
 
 ### Fixed: Optimizer could not find dod-lite after a GitHub install
 
