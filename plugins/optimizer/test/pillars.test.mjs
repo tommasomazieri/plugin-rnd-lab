@@ -7,14 +7,17 @@ import {
   harnessHitl,
   electiveHitl,
   pillarsFor,
+  priceFor,
+  listCost,
   pinsFromManifest,
   promptParity,
   similarity,
 } from '../skills/analyze/scripts/compare-runs.mjs';
 
 const metrics = (over = {}) => ({
+  api_calls: 7,
   tokens: { input: 1, output: 2, cache_read: 3, cache_creation: 4 },
-  combined: { tokens: { input: 10, output: 20, cache_read: 30, cache_creation: 40 } },
+  combined: { api_calls: 50, tokens: { input: 10, output: 20, cache_read: 30, cache_creation: 40 } },
   tool_calls: {},
   user_bias: { real_user_turns: 1 },
   turn_counter: { turns: 5 },
@@ -71,10 +74,11 @@ test('elective HITL floors at zero rather than going negative', () => {
   assert.equal(electiveHitl(m, dod), 0, 'a forged or double-counted answer must not manufacture autonomy');
 });
 
-test('pillarsFor: input_tokens includes cache, and uses combined (arm + subagents)', () => {
+test('pillarsFor: unique_tokens leaves cache reads out, and uses combined (arm + subagents)', () => {
   const p = pillarsFor(metrics(), null);
-  assert.equal(p.input_tokens, 10 + 30 + 40, 'cache reads and writes are input tokens you paid for');
-  assert.equal(p.output_tokens, 20);
+  assert.equal(p.unique_tokens, 10 + 40 + 20, 'uncached input + cache writes + output; cache reads are api_calls x context');
+  assert.equal(p.api_calls, 50);
+  assert.equal(p.api_calls_per_turn, 10);
   assert.equal(p.turns, 5);
   assert.equal(p.quality, null, 'quality comes from the rubric, never from this file');
 });
@@ -83,7 +87,31 @@ test('pillarsFor: falls back to the arm session alone when there is no combined 
   const m = metrics();
   delete m.combined;
   const p = pillarsFor(m, null);
-  assert.equal(p.input_tokens, 1 + 3 + 4);
+  assert.equal(p.unique_tokens, 1 + 4 + 2);
+  assert.equal(p.api_calls, 7);
+});
+
+test('pillarsFor: no turn counter means no per-turn rate, not a division by zero', () => {
+  const p = pillarsFor(metrics({ turn_counter: null }), null);
+  assert.equal(p.api_calls_per_turn, null);
+});
+
+test('priceFor: exact id or a date suffix, never a looser prefix', () => {
+  assert.equal(priceFor('claude-opus-5-5').key, 'claude-opus-5-5', 'longer key is not shadowed by claude-opus-5');
+  assert.equal(priceFor('claude-opus-5').key, 'claude-opus-5');
+  assert.equal(priceFor('claude-haiku-4-5-20251001').key, 'claude-haiku-4-5');
+  assert.equal(priceFor('claude-opus-4-9'), null, 'an unknown model is not priced as claude-opus-4');
+});
+
+test('listCost: prices each category, splits 1h from 5m writes, and never guesses a model', () => {
+  const table = { m: { input: 1, output: 10, cache_write_5m: 2, cache_write_1h: 4, cache_read: 0.5 } };
+  const t = { input: 1e6, output: 1e6, cache_read: 2e6, cache_creation: 3e6, cache_creation_1h: 1e6 };
+  assert.equal(listCost({ m: t }, table).usd, 1 + 10 + 1 + 2 * 2 + 4, '2M of the writes at 5m, 1M at 1h');
+  const unknown = listCost({ m: t, mystery: t }, table);
+  assert.equal(unknown.usd, null, 'a partial total would read as a saving');
+  assert.deepEqual(unknown.unpriced, ['mystery']);
+  const zero = { input: 0, output: 0, cache_read: 0, cache_creation: 0, cache_creation_1h: 0 };
+  assert.equal(listCost({ m: t, '<synthetic>': zero }, table).usd, 20, 'a model with no usage does not null the total');
 });
 
 test('pillarsFor: a missing turn counter yields null, never a fabricated number', () => {

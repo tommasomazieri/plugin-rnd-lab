@@ -2,7 +2,7 @@
   "name": "core",
   "displayName": "R&D Lab Core",
   "description": "The teaching entry point for the plugin-rnd-lab marketplace. Explains both stages in plain language — Prospector (discovery: what is worth building at all) and Optimizer (A/B measurement: does it actually help) — how they chain via a pre-written mandate, and why the dod-lite auditor is a separate plugin. Ships no workflow steps and writes no files: it is a walkthrough and reference skill, invoked by the user, never auto-triggered mid-task.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": {
     "name": "Tommaso Mazieri"
   },

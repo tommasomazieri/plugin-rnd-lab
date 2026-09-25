@@ -196,16 +196,19 @@ function build(testenvRoot) {
       lines.push('_No analysed runs yet._');
     } else {
       lines.push('Each row is a delta between that run\'s two arms, on that run\'s own task. **Rows are not comparable to each other.**\n');
-      lines.push('| run | control pins | test pins | in | out | turns | autonomy | report |');
-      lines.push('|---|---|---|---|---|---|---|---|');
+      lines.push('| run | control pins | test pins | unique tokens | api calls | turns | autonomy | list cost | report |');
+      lines.push('|---|---|---|---|---|---|---|---|---|');
       for (const r of analysed) {
         const d = r.comparison.pillars?.deltas_test_vs_control || {};
         const pins = r.comparison.pins || {};
         lines.push(
-          `| ${r.name} | ${pinLine(pins, 'control')} | ${pinLine(pins, 'test')} | ${fmtPct(d.input_tokens_pct)} | ` +
-            `${fmtPct(d.output_tokens_pct)} | ${fmtPct(d.turns_pct)} | ${d.autonomy_hitl_elective ?? '—'} | ` +
-            `${r.report ? `[report](${r.report})` : '—'} |`,
+          `| ${r.name} | ${pinLine(pins, 'control')} | ${pinLine(pins, 'test')} | ${fmtPct(d.unique_tokens_pct)} | ` +
+            `${fmtPct(d.api_calls_pct)} | ${fmtPct(d.turns_pct)} | ${d.autonomy_hitl_elective ?? '—'} | ` +
+            `${fmtPct(r.comparison.cost?.delta_pct)} | ${r.report ? `[report](${r.report})` : '—'} |`,
         );
+      }
+      if (analysed.some((r) => !('api_calls_pct' in (r.comparison.pillars?.deltas_test_vs_control || {})))) {
+        lines.push('\nA `—` under unique tokens / api calls: that run was analysed before optimizer 0.9.0. Re-run `compare-runs.mjs` on it to fill them from its transcripts.');
       }
       lines.push('\n`*` on a pin means it was snapshotted from a dirty working tree: replayable from its cached snapshot, but not reconstructible from git history alone.');
       const unanalysed = runs.filter((r) => !r.comparison);

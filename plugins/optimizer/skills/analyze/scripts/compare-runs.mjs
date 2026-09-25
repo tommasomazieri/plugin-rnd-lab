@@ -28,6 +28,10 @@ import { readCounter, counterPath } from '../../fire/scripts/turn-counter.mjs';
 
 const ARMS = ['control', 'test'];
 
+// Dated list prices, pinned into every comparison.json that uses them, so a run's cost
+// stays reproducible after the table is updated.
+const PRICES = JSON.parse(fs.readFileSync(new URL('../prices.json', import.meta.url), 'utf8'));
+
 function fail(msg) {
   console.error(`[optimizer] ERROR: ${msg}`);
   process.exit(1);
@@ -207,13 +211,26 @@ export function promptParity(controlMetrics, testMetrics) {
  * The four countable pillars. `quality` is deliberately absent — it is scored against the
  * mandate's versioned rubric into analysis/quality-<arm>.json, because a number derived
  * from this run's own DoD checks would not be comparable to any other run's.
+ *
+ * Why these two token pillars. Every API call re-reads the whole context from cache, and
+ * cache reads were 66% of list-price cost across a month of real sessions (2026-09-25).
+ * Cache reads are roughly api_calls x context size. The context's baseline size is set by
+ * the window, auto-compact and the user, not by the artifact, so it is not a pillar:
+ *   - `api_calls` is the multiplier the artifact controls (parallel calls, one script
+ *     instead of a chain of commands).
+ *   - `unique_tokens` is what the artifact adds: uncached input + cache writes + output,
+ *     each paid once. Over-fetching to save a call shows up here, so the two check each other.
+ * `api_calls_per_turn` is a reading, not a pillar.
  */
 export function pillarsFor(m, dodSession) {
   const tok = m.combined?.tokens || m.tokens;
+  const apiCalls = m.combined?.api_calls ?? m.api_calls ?? null;
+  const turns = m.turn_counter?.turns ?? null;
   return {
-    input_tokens: (tok.input || 0) + (tok.cache_read || 0) + (tok.cache_creation || 0),
-    output_tokens: tok.output || 0,
-    turns: m.turn_counter?.turns ?? null,
+    unique_tokens: (tok.input || 0) + (tok.cache_creation || 0) + (tok.output || 0),
+    api_calls: apiCalls,
+    api_calls_per_turn: apiCalls !== null && turns ? Math.round((apiCalls / turns) * 10) / 10 : null,
+    turns,
     autonomy: {
       hitl_elective: electiveHitl(m, dodSession),
       hitl_total: (m.tool_calls?.AskUserQuestion || 0) + Math.max(0, (m.user_bias?.real_user_turns || 0) - 1),
@@ -222,6 +239,38 @@ export function pillarsFor(m, dodSession) {
     },
     quality: null,
   };
+}
+
+/** Exact id, or id plus a date suffix. Prefix matching would price an unknown
+ *  `claude-opus-4-9` as `claude-opus-4`, three times too high, without saying so. */
+export function priceFor(model, table = PRICES.models) {
+  const key = Object.keys(table).find((k) => model === k || new RegExp(`^${k}-\\d{8}$`).test(model));
+  return key ? { key, ...table[key] } : null;
+}
+
+/**
+ * List-price cost of one arm. A reading, not a pillar: it is the tiebreak when api_calls and
+ * unique_tokens move in opposite directions. Any unpriced model with real usage makes the
+ * total null rather than a silent undercount.
+ */
+export function listCost(tokensByModel, table = PRICES.models) {
+  let usd = 0;
+  const unpriced = [];
+  const prices_used = {};
+  for (const [model, t] of Object.entries(tokensByModel || {})) {
+    if (!(t.input + t.output + t.cache_read + t.cache_creation)) continue;
+    const p = priceFor(model, table);
+    if (!p) {
+      unpriced.push(model);
+      continue;
+    }
+    prices_used[p.key] = table[p.key];
+    // Writes with no TTL split are priced at the 5-minute rate: a floor, never an overcharge.
+    const w1h = t.cache_creation_1h || 0;
+    usd += (t.input * p.input + t.output * p.output + t.cache_read * p.cache_read
+      + (t.cache_creation - w1h) * p.cache_write_5m + w1h * p.cache_write_1h) / 1e6;
+  }
+  return { usd: unpriced.length ? null : Math.round(usd * 1e4) / 1e4, unpriced, prices_used };
 }
 
 /** Resolved artifact identities per arm, tolerating schema-1 manifests. */
@@ -312,11 +361,7 @@ export function compareRun(runDir) {
     };
     // `combined` is what the arm actually cost. `metrics[arm].tokens` stays the
     // arm session alone so the split remains inspectable.
-    metrics[arm].combined = {
-      tokens: rolled.total.tokens,
-      tool_calls_total: rolled.total.tool_calls_total,
-      assistant_messages: rolled.total.assistant_messages,
-    };
+    metrics[arm].combined = rolled.total;
     if (rolled.unaccounted_dispatches > 0) {
       flags.push(
         `${arm} arm: ${rolled.unaccounted_dispatches} agent dispatch(es) have NO locatable transcript — that work is real and still unmeasured. Every cost number for this arm is a floor, not a total.`,
@@ -471,6 +516,14 @@ export function compareRun(runDir) {
         : 'control/test check lists identical, all checks generic';
   }
 
+  const pillars = { control: pillarsFor(c, dodSessions.control), test: pillarsFor(t, dodSessions.test) };
+  const cost = { control: listCost(c.combined.tokens_by_model), test: listCost(t.combined.tokens_by_model) };
+  for (const arm of ARMS) {
+    if (cost[arm].unpriced.length) {
+      flags.push(`${arm} arm: no list price for model(s) [${cost[arm].unpriced.join(', ')}] in skills/analyze/prices.json — its cost is null, not estimated.`);
+    }
+  }
+
   const comparison = {
     schema: 2,
     experiment: manifest.experiment,
@@ -484,17 +537,25 @@ export function compareRun(runDir) {
         'The five axes progress is tracked on. quality is scored separately against the mandate\'s ' +
         'quality-rubric (analysis/quality-<arm>.json) and is NOT derivable from this file alone; ' +
         'the other four are counted here. Lower is better on every axis except quality.',
-      control: pillarsFor(c, dodSessions.control),
-      test: pillarsFor(t, dodSessions.test),
+      control: pillars.control,
+      test: pillars.test,
       deltas_test_vs_control: {
-        input_tokens_pct: pct(
-          t.combined.tokens.input + t.combined.tokens.cache_read + t.combined.tokens.cache_creation,
-          c.combined.tokens.input + c.combined.tokens.cache_read + c.combined.tokens.cache_creation,
-        ),
-        output_tokens_pct: pct(t.combined.tokens.output, c.combined.tokens.output),
+        unique_tokens_pct: pct(pillars.test.unique_tokens, pillars.control.unique_tokens),
+        api_calls_pct: pct(pillars.test.api_calls, pillars.control.api_calls),
         turns_pct: pct(t.turn_counter?.turns, c.turn_counter?.turns),
         autonomy_hitl_elective: electiveHitl(t, dodSessions.test) - electiveHitl(c, dodSessions.control),
       },
+    },
+    cost: {
+      note:
+        'List price of each arm, arm session plus subagents. A reading, not a pillar: no priority or guard ' +
+        'can be declared on it. It settles runs where api_calls and unique_tokens move in opposite directions.',
+      source: PRICES.source,
+      verified_at: PRICES.verified_at,
+      unit: 'USD',
+      control: cost.control,
+      test: cost.test,
+      delta_pct: pct(cost.test.usd, cost.control.usd),
     },
     totals: {
       control: summarize(c),
@@ -518,7 +579,7 @@ export function compareRun(runDir) {
       output_tokens_pct: pct(t.combined.tokens.output, c.combined.tokens.output),
       cache_read_pct: pct(t.combined.tokens.cache_read, c.combined.tokens.cache_read),
       cache_creation_pct: pct(t.combined.tokens.cache_creation, c.combined.tokens.cache_creation),
-      assistant_messages_pct: pct(t.combined.assistant_messages, c.combined.assistant_messages),
+      api_calls_pct: pct(t.combined.api_calls, c.combined.api_calls),
       tool_calls_pct: pct(t.combined.tool_calls_total, c.combined.tool_calls_total),
       tool_errors: t.tool_errors - c.tool_errors,
       duration_seconds_pct: pct(t.duration.seconds, c.duration.seconds),
@@ -578,7 +639,7 @@ function summarize(m) {
     turns: m.turn_counter?.turns ?? null,
     stops_total: m.turn_counter?.stops_total ?? null,
     blocked_continuations: m.turn_counter?.blocked_continuations ?? null,
-    assistant_messages: m.turns.assistant_messages,
+    api_calls: m.api_calls,
     user_real_turns: m.turns.user_real,
     // Background-Agent completions that re-entered the session as `type: "user"`.
     // Reported rather than dropped: a large asymmetry here is the delegation signal
@@ -597,11 +658,13 @@ function printSummary(cmp) {
     ['metric', 'control', 'test', 'delta'],
     ['turns (Stop)', cmp.totals.control.turns ?? 'n/a', cmp.totals.test.turns ?? 'n/a', fmt(cmp.deltas_test_vs_control.turns_pct)],
     ['stops total', cmp.totals.control.stops_total ?? 'n/a', cmp.totals.test.stops_total ?? 'n/a', ''],
+    ['api calls', cmp.pillars.control.api_calls, cmp.pillars.test.api_calls, fmt(cmp.pillars.deltas_test_vs_control.api_calls_pct)],
+    ['unique tokens', cmp.pillars.control.unique_tokens, cmp.pillars.test.unique_tokens, fmt(cmp.pillars.deltas_test_vs_control.unique_tokens_pct)],
+    ['cost (list $)', cmp.cost.control.usd ?? 'n/a', cmp.cost.test.usd ?? 'n/a', fmt(cmp.cost.delta_pct)],
     ['input tokens', cmp.totals.control.combined.tokens.input, cmp.totals.test.combined.tokens.input, fmt(cmp.deltas_test_vs_control.input_tokens_pct)],
     ['output tokens', cmp.totals.control.combined.tokens.output, cmp.totals.test.combined.tokens.output, fmt(cmp.deltas_test_vs_control.output_tokens_pct)],
     ['cache read', cmp.totals.control.combined.tokens.cache_read, cmp.totals.test.combined.tokens.cache_read, fmt(cmp.deltas_test_vs_control.cache_read_pct)],
     ['cache creation', cmp.totals.control.combined.tokens.cache_creation, cmp.totals.test.combined.tokens.cache_creation, fmt(cmp.deltas_test_vs_control.cache_creation_pct)],
-    ['assistant msgs', cmp.totals.control.combined.assistant_messages, cmp.totals.test.combined.assistant_messages, fmt(cmp.deltas_test_vs_control.assistant_messages_pct)],
     ['tool calls', cmp.totals.control.combined.tool_calls_total, cmp.totals.test.combined.tool_calls_total, fmt(cmp.deltas_test_vs_control.tool_calls_pct)],
     ['tool errors', cmp.totals.control.tool_errors, cmp.totals.test.tool_errors, String(cmp.deltas_test_vs_control.tool_errors)],
     ['duration (s)', cmp.totals.control.duration_seconds, cmp.totals.test.duration_seconds, fmt(cmp.deltas_test_vs_control.duration_seconds_pct)],

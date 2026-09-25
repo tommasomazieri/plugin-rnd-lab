@@ -27,15 +27,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const PILLARS = ['quality', 'input_tokens', 'output_tokens', 'turns', 'autonomy'];
+export const PILLARS = ['quality', 'unique_tokens', 'api_calls', 'turns', 'autonomy'];
 
 /** Which way is an improvement. Quality is the only pillar you want to go up. */
 export const BETTER_DIRECTION = {
   quality: 'up',
-  input_tokens: 'down',
-  output_tokens: 'down',
+  unique_tokens: 'down',
+  api_calls: 'down',
   turns: 'down',
   autonomy: 'down', // fewer elective HITL interruptions
+};
+
+/**
+ * Replaced in 0.9.0. `input_tokens` summed cache reads, cache writes and uncached input,
+ * which differ up to 40x in price, so a run could look worse on it while costing less.
+ * An objective still naming one of these resolves nothing until it is re-declared.
+ */
+export const RETIRED_PILLARS = {
+  input_tokens: 'api_calls (cache reads scale with calls) and unique_tokens (cache writes + uncached input)',
+  output_tokens: 'unique_tokens (output + cache writes + uncached input)',
 };
 
 export const OUTCOMES = ['confirmed', 'won-at-a-cost', 'refuted', 'inconclusive'];
@@ -98,6 +108,7 @@ export function declarePriority(testenvRoot, { priority, guards, rationale, at =
   }
   obj.priority = priority;
   obj.guards = guards && typeof guards === 'object' ? guards : obj.guards || {};
+  for (const p of Object.keys(obj.guards)) if (!PILLARS.includes(p)) delete obj.guards[p]; // retired pillars
   for (const p of PILLARS) {
     if (p === priority) continue;
     if (!(p in obj.guards)) obj.guards[p] = { max_regression_pct: 10 };
@@ -194,6 +205,13 @@ export function classifyOutcome({ objective, deltas, contaminated = false }) {
   if (contaminated) return { outcome: 'inconclusive', breaches: [], why: 'run flagged contaminated or underpowered — it cannot resolve anything' };
   const priority = objective.priority;
   if (!priority) return { outcome: 'inconclusive', breaches: [], why: 'no priority pillar declared, so there is nothing to have moved' };
+  if (RETIRED_PILLARS[priority]) {
+    return {
+      outcome: 'inconclusive',
+      breaches: [],
+      why: `the declared priority "${priority}" was retired in optimizer 0.9.0; it is now measured as ${RETIRED_PILLARS[priority]}. Re-declare with lab-cli.mjs objective --priority <pillar>.`,
+    };
+  }
 
   const d = deltas[priority];
   if (d === null || d === undefined) {

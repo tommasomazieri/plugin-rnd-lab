@@ -170,8 +170,15 @@ way to lie to yourself. Two structures carry progress instead:
 
 Progress is steered by **one declared priority pillar plus regression guards on the other
 four** — there is no aggregate score, because a single number would let a real loss hide inside
-a bigger win. The five pillars: `quality` (higher is better), `input_tokens`, `output_tokens`,
+a bigger win. The five pillars: `quality` (higher is better), `unique_tokens`, `api_calls`,
 `turns`, `autonomy` (lower is better on all four).
+
+The two token pillars follow where the bill actually comes from. Every API call re-reads the
+whole context from cache, and cache reads were 66% of list-price cost across a month of real
+sessions. `api_calls` counts model requests, the multiplier on those reads. `unique_tokens`
+counts what each arm added, each token paid once: uncached input, cache writes, output. Each
+run's `comparison.json` also carries a `cost` block: both arms at list price, from the dated
+table in `skills/analyze/prices.json`, pinned into the run. It is a reading, not a pillar.
 
 `autonomy` counts only *elective* HITL — `AskUserQuestion` calls plus unprompted user turns.
 The harness no longer forces any: the DoD auditor never speaks to an arm, so there is nothing to

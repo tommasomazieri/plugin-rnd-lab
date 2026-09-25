@@ -1,5 +1,38 @@
 # Changelog
 
+## The token pillars follow the bill: API calls and unique tokens
+
+**`optimizer` 0.8.4 → 0.9.0, `core` 0.1.2 → 0.1.3.** Breaking for a lab whose declared priority
+or guards name a retired pillar.
+
+Every API call re-reads the whole context from cache. Across a month of real sessions
+(2026-09-25, list prices), cache reads were 66% of the cost, cache writes 19%, output 15%, at
+15.6 calls per user turn. The old `input_tokens` pillar added cache reads, cache writes and
+uncached input into one number, although on Opus 5.5 they differ 40x in price. A run could
+score worse on it while costing less.
+
+- **`input_tokens` and `output_tokens` are replaced by `api_calls` and `unique_tokens`.**
+  `api_calls` counts model requests, the multiplier on cache reads. `unique_tokens` is uncached
+  input + cache writes + output: what an arm added, each token paid once. Cache reads are not a
+  pillar. They scale with calls × context size, and the context's baseline size is set by the
+  window, auto-compact and the user, not by the artifact.
+- **`api_calls` counts requests, not lines.** It counts distinct message ids and skips
+  `<synthetic>` entries. The old `assistant_messages` counted one JSONL line per content block,
+  and it no longer appears in the deltas or the summary table.
+- **A list-price `cost` block in `comparison.json`** for both arms, subagents included, each
+  priced at its own model's rate. It uses `skills/analyze/prices.json`, verified 2026-09-25
+  against the pricing docs. The rows used are pinned into the run. A model missing from the
+  table leaves the cost `null` and raises a parity flag, never an estimate. It is a reading,
+  not a pillar: it settles runs where the two token pillars move in opposite directions.
+- **The comparator names the lever** behind an `api_calls` delta: independent calls made one at
+  a time, a mechanical chain one script could run, a judgment chain that belongs in a
+  subagent, or tokens the artifact adds to every call.
+- **Older labs.** An objective whose priority is `input_tokens` or `output_tokens` now
+  classifies every run `inconclusive`, saying why, until it is re-declared with
+  `lab-cli.mjs objective`. Re-declaring drops guards on retired pillars and keeps the old
+  priority in `prior_priorities`. Re-run `compare-runs.mjs` on an old run to fill in the new
+  columns, if its transcripts still exist.
+
 ## A way back to the author: the feedback link, where a stretch of work ends
 
 **`optimizer` 0.8.3 → 0.8.4, `prospector` 0.5.0 → 0.5.1, `core` 0.1.1 → 0.1.2.** Skill text only;

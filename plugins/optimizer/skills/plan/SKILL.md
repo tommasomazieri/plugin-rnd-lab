@@ -53,7 +53,7 @@ node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" rank "<testenvRoot>"
 ```
 
 **If no priority pillar is declared**, stop and settle it with the user first. The five
-pillars — `quality`, `input_tokens`, `output_tokens`, `turns`, `autonomy` — trade against
+pillars — `quality`, `unique_tokens`, `api_calls`, `turns`, `autonomy` — trade against
 each other, so "make it better" is not a direction. Exactly one is the priority; the rest
 carry regression guards.
 
@@ -96,7 +96,7 @@ If there are no open hypotheses, say so plainly and interview for one before goi
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" add "<testenvRoot>" \
-    --statement "<what should move, and why>" --pillars input_tokens,turns \
+    --statement "<what should move, and why>" --pillars api_calls,turns \
     --magnitude 20 --confidence 0.6 --cost 2 --why "<reasoning>"
 ```
 

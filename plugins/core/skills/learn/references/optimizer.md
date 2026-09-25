@@ -198,8 +198,10 @@ whether a run actually linked before walking away from it.
 
 ## The five pillars
 
-Every run scores both arms on: **quality** (rubric-scored), **input_tokens**, **output_tokens**,
-**turns**, **autonomy**. `lab/objective.json` declares one *priority* pillar plus *guards* —
+Every run scores both arms on: **quality** (rubric-scored), **unique_tokens**, **api_calls**,
+**turns**, **autonomy**. The token pillars follow the bill: every API call re-reads the whole
+context, so `api_calls` is the multiplier, and `unique_tokens` is what each arm added. A list-price
+`cost` for both arms is reported next to them. `lab/objective.json` declares one *priority* pillar plus *guards* —
 maximum tolerated regression percentages on the others — so a cost win that trashes quality is
 caught rather than celebrated.
 

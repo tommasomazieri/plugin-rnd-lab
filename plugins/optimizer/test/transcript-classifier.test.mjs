@@ -103,3 +103,21 @@ test('genuine operator interventions are still counted', () => {
   assert.equal(m.turns.user_system_reentry, 1);
   assert.equal(m.user_bias.user_turns.at(-1).preview, 'the deck is missing slide 9, add it');
 });
+
+// Claude Code writes one line per content block and repeats the usage object on each, so
+// counting assistant lines overstates model requests. api_calls is what re-reads the context.
+test('api_calls counts distinct message ids, not lines, and skips synthetic entries', () => {
+  const usage = { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 100, cache_creation_input_tokens: 10, cache_creation: { ephemeral_1h_input_tokens: 4 } };
+  const reply = (id, model, block) => ({ type: 'assistant', message: { id, model, usage, content: [block] } });
+  const m = analyzeFile(jsonl([
+    reply('msg_1', 'claude-opus-5-5', { type: 'text', text: 'reading two files' }),
+    reply('msg_1', 'claude-opus-5-5', { type: 'tool_use', name: 'Read', input: {} }),
+    reply('msg_1', 'claude-opus-5-5', { type: 'tool_use', name: 'Read', input: {} }),
+    reply('msg_2', 'claude-opus-5-5', { type: 'text', text: 'done' }),
+    reply('msg_3', '<synthetic>', { type: 'text', text: 'interrupted' }),
+  ]));
+  assert.equal(m.turns.assistant_messages, 5, 'lines');
+  assert.equal(m.api_calls, 2, 'two requests reached the model; the synthetic entry did not');
+  assert.equal(m.tokens_by_model['claude-opus-5-5'].cache_read, 200, 'usage counted once per request');
+  assert.equal(m.tokens_by_model['claude-opus-5-5'].cache_creation_1h, 8, '1h writes kept apart for pricing');
+});

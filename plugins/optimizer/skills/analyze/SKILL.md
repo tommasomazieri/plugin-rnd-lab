@@ -192,7 +192,7 @@ under a heading that says they are unverified.
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../lib/lab-cli.mjs" classify "<testenvRoot>" \
-    --deltas '{"quality":<Δ>,"input_tokens":<Δ>,"output_tokens":<Δ>,"turns":<Δ>,"autonomy":<Δ>}' \
+    --deltas '{"quality":<Δ>,"unique_tokens":<Δ>,"api_calls":<Δ>,"turns":<Δ>,"autonomy":<Δ>}' \
     [--contaminated]
 ```
 
@@ -335,7 +335,7 @@ Write it in the shape run-004 used, which an implementer could act on cold:
 Generated for a session that has read nothing else. Every path is absolute.
 Ordered by priority. Nothing here is a hypothesis to test — these are changes to make.
 
-## PRIORITY 1 — <pillar this moves, e.g. input_tokens>
+## PRIORITY 1 — <pillar this moves, e.g. api_calls>
 
 ### 1. <imperative one-line title>
 - **File(s):** `<absolute path>`, function/symbol `<name>` where applicable

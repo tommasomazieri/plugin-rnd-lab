@@ -9,10 +9,14 @@
  *
  * Parsing is defensive: unknown fields ignored, malformed lines counted and skipped.
  * Token usage is deduped by message.id — Claude Code writes one JSONL line per
- * content block of the same API message, repeating the usage object on each.
+ * content block of the same API message, repeating the usage object on each. The
+ * same dedupe gives `api_calls`: one distinct message.id is one model request, and
+ * every request re-reads the whole context. `turns.assistant_messages` counts LINES
+ * and overstates it.
  *
- * No LLM, no judgment, no cost table (model pricing drifts; token counts are the
- * stable ground truth). The subjective layer lives in the session-comparator agent.
+ * No LLM, no judgment, no prices: token counts are the ground truth here. compare-runs
+ * prices them from a dated table and pins that table into comparison.json. The
+ * subjective layer lives in the session-comparator agent.
  */
 
 import fs from 'node:fs';
@@ -27,6 +31,18 @@ const MUTATING_TOOLS = new Set([
   'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Task', 'Agent',
 ]);
 
+// `cache_creation_1h` is the part of `cache_creation` written with the 1-hour TTL, which is
+// priced higher than the 5-minute one. Kept separately only so the cost can be computed.
+export const ZERO = () => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0, cache_creation_1h: 0 });
+
+function addUsage(t, usage) {
+  t.input += usage.input_tokens || 0;
+  t.output += usage.output_tokens || 0;
+  t.cache_read += usage.cache_read_input_tokens || 0;
+  t.cache_creation += usage.cache_creation_input_tokens || 0;
+  t.cache_creation_1h += usage.cache_creation?.ephemeral_1h_input_tokens || 0;
+}
+
 export function analyzeFile(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split('\n').filter((l) => l.trim().length > 0);
@@ -37,7 +53,8 @@ export function analyzeFile(filePath) {
     malformed_lines: 0,
     models: {},
     turns: { user_real: 0, user_system_reentry: 0, user_tool_results: 0, user_meta: 0, assistant_messages: 0, sidechain_lines: 0 },
-    tokens: { input: 0, output: 0, cache_read: 0, cache_creation: 0 },
+    api_calls: 0,
+    tokens: ZERO(),
     tokens_by_model: {},
     cost_usd_reported: 0,
     has_reported_cost: false,
@@ -98,17 +115,11 @@ export function analyzeFile(filePath) {
       const usageKey = e.message.id || e.requestId || e.uuid;
       if (usage && usageKey && !seenUsageIds.has(usageKey)) {
         seenUsageIds.add(usageKey);
-        m.tokens.input += usage.input_tokens || 0;
-        m.tokens.output += usage.output_tokens || 0;
-        m.tokens.cache_read += usage.cache_read_input_tokens || 0;
-        m.tokens.cache_creation += usage.cache_creation_input_tokens || 0;
-        const bm = (m.tokens_by_model[model] = m.tokens_by_model[model] || {
-          input: 0, output: 0, cache_read: 0, cache_creation: 0,
-        });
-        bm.input += usage.input_tokens || 0;
-        bm.output += usage.output_tokens || 0;
-        bm.cache_read += usage.cache_read_input_tokens || 0;
-        bm.cache_creation += usage.cache_creation_input_tokens || 0;
+        // `<synthetic>` entries are written by Claude Code itself (interrupts, API errors):
+        // no request reached the model, so nothing was re-read.
+        if (model !== '<synthetic>') m.api_calls++;
+        const bm = (m.tokens_by_model[model] = m.tokens_by_model[model] || ZERO());
+        for (const t of [m.tokens, bm]) addUsage(t, usage);
       }
 
       const content = Array.isArray(e.message.content) ? e.message.content : [];
@@ -250,8 +261,6 @@ export function countAgentDispatches(m) {
   return (m.tool_calls?.Task || 0) + (m.tool_calls?.Agent || 0);
 }
 
-const ZERO = () => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0 });
-
 /**
  * analyzeFile plus every subagent session it spawned, rolled into one total.
  *
@@ -265,12 +274,17 @@ export function analyzeWithSubagents(transcriptPath) {
   const found = collectSubagentTranscripts(transcriptPath);
   const subagents = found.map((s) => ({ ...s, metrics: analyzeFile(s.path) }));
 
-  const total = { tokens: ZERO(), tool_calls_total: self.tool_calls_total, assistant_messages: self.turns.assistant_messages };
-  for (const k of Object.keys(total.tokens)) total.tokens[k] = self.tokens[k];
-  for (const s of subagents) {
-    for (const k of Object.keys(total.tokens)) total.tokens[k] += s.metrics.tokens[k];
-    total.tool_calls_total += s.metrics.tool_calls_total;
-    total.assistant_messages += s.metrics.turns.assistant_messages;
+  // Per model too: a subagent can run on a cheaper model, and pricing it at the parent's
+  // rate would misstate the cost of delegating.
+  const total = { tokens: ZERO(), tokens_by_model: {}, tool_calls_total: 0, api_calls: 0 };
+  for (const m of [self, ...subagents.map((s) => s.metrics)]) {
+    for (const k of Object.keys(total.tokens)) total.tokens[k] += m.tokens[k] || 0;
+    for (const [model, t] of Object.entries(m.tokens_by_model)) {
+      const bm = (total.tokens_by_model[model] = total.tokens_by_model[model] || ZERO());
+      for (const k of Object.keys(bm)) bm[k] += t[k] || 0;
+    }
+    total.tool_calls_total += m.tool_calls_total;
+    total.api_calls += m.api_calls;
   }
 
   const dispatches = countAgentDispatches(self);

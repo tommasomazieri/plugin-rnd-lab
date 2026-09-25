@@ -29,20 +29,20 @@ const root = () => {
 
 test('declaring a priority auto-guards every other pillar and never guards the priority', () => {
   const r = root();
-  const obj = declarePriority(r, { priority: 'input_tokens', rationale: 'cost is the current pain' });
-  assert.equal(obj.priority, 'input_tokens');
-  assert.ok(!('input_tokens' in obj.guards), 'you cannot guard the thing you are deliberately moving');
-  assert.deepEqual(Object.keys(obj.guards).sort(), ['autonomy', 'output_tokens', 'quality', 'turns']);
+  const obj = declarePriority(r, { priority: 'api_calls', rationale: 'cost is the current pain' });
+  assert.equal(obj.priority, 'api_calls');
+  assert.ok(!('api_calls' in obj.guards), 'you cannot guard the thing you are deliberately moving');
+  assert.deepEqual(Object.keys(obj.guards).sort(), ['autonomy', 'quality', 'turns', 'unique_tokens']);
 });
 
 test('a priority shift is retired into the record, not overwritten', () => {
   const r = root();
-  declarePriority(r, { priority: 'input_tokens', rationale: 'cost first' });
+  declarePriority(r, { priority: 'api_calls', rationale: 'cost first' });
   declarePriority(r, { priority: 'quality', rationale: 'cost is solved; output is now the problem' });
   const obj = readObjective(r);
   assert.equal(obj.priority, 'quality');
   assert.equal(obj.prior_priorities.length, 1);
-  assert.equal(obj.prior_priorities[0].priority, 'input_tokens');
+  assert.equal(obj.prior_priorities[0].priority, 'api_calls');
   assert.equal(obj.prior_priorities[0].rationale, 'cost first', 'why we cared then is the point of keeping it');
   assert.ok(obj.prior_priorities[0].retired_at);
 });
@@ -63,7 +63,7 @@ test('ranking puts priority-moving hypotheses first regardless of raw score', ()
   const r = root();
   declarePriority(r, { priority: 'turns' });
   // Big score, but cannot move the priority.
-  addHypothesis(r, { statement: 'huge win elsewhere', target_pillars: ['output_tokens'], predicted_magnitude_pct: 90, confidence: 1, est_cost: 1 });
+  addHypothesis(r, { statement: 'huge win elsewhere', target_pillars: ['unique_tokens'], predicted_magnitude_pct: 90, confidence: 1, est_cost: 1 });
   // Small score, but on the priority.
   addHypothesis(r, { statement: 'small win on the thing that matters', target_pillars: ['turns'], predicted_magnitude_pct: 5, confidence: 0.4, est_cost: 2 });
 
@@ -95,8 +95,8 @@ test('resolved hypotheses drop out of the ranking', () => {
 
 test('classify: priority improved, guards held -> confirmed', () => {
   const r = root();
-  declarePriority(r, { priority: 'input_tokens', guards: { quality: { max_regression_pct: 5 } } });
-  const out = classifyOutcome({ objective: readObjective(r), deltas: { input_tokens: -20, quality: 1, turns: -2 } });
+  declarePriority(r, { priority: 'api_calls', guards: { quality: { max_regression_pct: 5 } } });
+  const out = classifyOutcome({ objective: readObjective(r), deltas: { api_calls: -20, quality: 1, turns: -2 } });
   assert.equal(out.outcome, 'confirmed');
   assert.deepEqual(out.breaches, []);
 });
@@ -104,8 +104,8 @@ test('classify: priority improved, guards held -> confirmed', () => {
 test('classify: priority improved but a guard breached -> won-at-a-cost', () => {
   // The case a single aggregate score would have hidden entirely.
   const r = root();
-  declarePriority(r, { priority: 'input_tokens', guards: { quality: { max_regression_pct: 5 } } });
-  const out = classifyOutcome({ objective: readObjective(r), deltas: { input_tokens: -30, quality: -12 } });
+  declarePriority(r, { priority: 'api_calls', guards: { quality: { max_regression_pct: 5 } } });
+  const out = classifyOutcome({ objective: readObjective(r), deltas: { api_calls: -30, quality: -12 } });
   assert.equal(out.outcome, 'won-at-a-cost');
   assert.equal(out.breaches[0].pillar, 'quality');
   assert.match(out.why, /quality regressed -12% past its 5% guard/);
@@ -125,6 +125,20 @@ test('classify: an unmeasured priority or a contaminated run resolves nothing', 
   assert.equal(classifyOutcome({ objective: obj, deltas: { turns: null } }).outcome, 'inconclusive');
   assert.equal(classifyOutcome({ objective: obj, deltas: {} }).outcome, 'inconclusive');
   assert.equal(classifyOutcome({ objective: obj, deltas: { turns: -50 }, contaminated: true }).outcome, 'inconclusive');
+});
+
+test('a lab declared before 0.9.0 resolves nothing until re-declared, and re-declaring drops retired guards', () => {
+  const r = root();
+  // objective.json as an older optimizer wrote it: priority and a guard on retired pillars.
+  const old = { schema: 1, priority: 'input_tokens', guards: { output_tokens: { max_regression_pct: 10 } }, declared_at: null, rationale: null, prior_priorities: [] };
+  fs.writeFileSync(path.join(r, 'lab', 'objective.json'), JSON.stringify(old));
+  const out = classifyOutcome({ objective: readObjective(r), deltas: { api_calls: -40, unique_tokens: -10 } });
+  assert.equal(out.outcome, 'inconclusive');
+  assert.match(out.why, /retired in optimizer 0\.9\.0.*Re-declare/);
+
+  const obj = declarePriority(r, { priority: 'api_calls' });
+  assert.ok(!('output_tokens' in obj.guards), 'a guard on a pillar that no longer exists would never fire');
+  assert.equal(obj.prior_priorities[0].priority, 'input_tokens', 'the old priority stays in the record');
 });
 
 test('classify: with no priority declared nothing can be resolved', () => {

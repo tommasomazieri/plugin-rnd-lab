@@ -56,7 +56,7 @@ baseline, test = plugin under test.
    grading it by token count alone is exactly the blind spot this pipeline exists to close.
    A flag reading `has tokens but no readable transcript` means that one is genuinely
    unmeasurable: say so, do not infer its behaviour from its cost.
-3. **Read `analysis/comparison.json`** for pins, the five-pillar block, deterministic totals,
+3. **Read `analysis/comparison.json`** for pins, the five-pillar block, the list-price `cost`, deterministic totals,
    deltas, bias indicators, parity flags and `dod_tracking`. Ground truth — never contradicted.
 4. Read the `.dod/sessions/<session-id>.json` for each arm (paths in `comparison.json.dod_tracking`),
    `runs/run-NNN/dod-checks.json`, `env.json`, and `mandate.md` if present.
@@ -110,8 +110,8 @@ or in `analysis/quality-<arm>.json`.
 | pillar | where it comes from | better |
 |---|---|---|
 | `quality` | `analysis/quality-<arm>.json`, rubric-scored | **higher** |
-| `input_tokens` | `pillars.<arm>.input_tokens` (input + cache_read + cache_creation, combined) | lower |
-| `output_tokens` | `pillars.<arm>.output_tokens` (combined) | lower |
+| `unique_tokens` | `pillars.<arm>.unique_tokens` (uncached input + cache_creation + output, combined) | lower |
+| `api_calls` | `pillars.<arm>.api_calls` — model requests, one per distinct message id, combined | lower |
 | `turns` | `pillars.<arm>.turns` — Stop-hook counted | lower |
 | `autonomy` | `pillars.<arm>.autonomy.hitl_elective` | lower |
 
@@ -122,9 +122,33 @@ heavily looks cheap on its own transcript for work it actually paid for.
 not scored this run and leave it out of the attribution. A number that isn't comparable across
 runs is worse than none, because it will be plotted anyway.
 
-**`turns` is not `assistant_messages`.** `assistant_messages` moves once per tool-call round
-trip, so a heavily tool-using arm looks like it took hundreds of "turns" against a light arm's
-handful. If `turn_counts.note` says INCOMPLETE, say so and do not compare turn totals at all.
+**`turns` is not `api_calls`.** A turn is one user prompt answered; `api_calls` moves once per
+model request inside it, so a tool-heavy arm makes dozens per turn. If `turn_counts.note` says
+INCOMPLETE, say so and do not compare turn totals at all.
+
+### Where the cost is, and the levers that move it
+
+Every API call re-reads the whole context from cache. Cache reads are most of the bill (66% of
+list-price cost across a month of real sessions), and they scale with `api_calls` × context
+size. The context's baseline size belongs to the window, auto-compact and the user, so the two
+things an artifact controls are the pillars: how many calls it makes, and how many tokens it
+adds (`unique_tokens`). `comparison.json` → `cost` prices both arms at list price; use it to
+settle a run where those two pillars moved in opposite directions.
+
+When you attribute an `api_calls` delta, or write a candidate hypothesis for one, name which of
+these the digests show:
+
+- **Independent calls made one at a time.** Reads, searches or commands whose inputs were all
+  known up front, issued in consecutive requests. Fix: have the artifact ask for them in one
+  response.
+- **A mechanical chain.** Each step's input is computed from the previous output with no
+  judgment: build, then pull out the errors; grep with a single hit, then print that range.
+  Fix: one script or command that does the whole chain.
+- **A judgment chain.** Each step depends on reading the previous result. It cannot be bundled.
+  Fix: run it in a subagent, whose calls re-read its own small context instead of the main one.
+- **Tokens the artifact adds to every call.** Skill text, hook injections, large tool outputs.
+  Each is written once, then re-read on every later call. That is a `unique_tokens` finding
+  first, and it makes every call more expensive.
 
 ### Autonomy, specifically
 
@@ -207,7 +231,7 @@ Each finding's `EVIDENCE:` must contain at least one of:
 - `digest-<arm>.md L<n>` — plus a short quote of what is at that anchor
 - `digest-<arm>-sub-<agent_id>.md L<n>` — same, for delegated work
 - `<transcript>.jsonl L<n>` — if you expanded the raw line yourself
-- `metric:<file>.<field>=<value>` — e.g. `metric:comparison.json.pillars.deltas_test_vs_control.input_tokens_pct=-31`
+- `metric:<file>.<field>=<value>` — e.g. `metric:comparison.json.pillars.deltas_test_vs_control.api_calls_pct=-31`
 
 A finding you could not anchor is not a finding. Two ways out, both honest, both required
 instead of guessing:
@@ -245,8 +269,8 @@ than padding. Mark the priority pillar with (PRIORITY) and any breached guard wi
 BREACHED).
 
 - quality <±n>: <cause>. EVIDENCE: <citation + quote>. [OBJECTIVE|SUBJECTIVE|UNVERIFIED]
-- input_tokens <±n%>: ...
-- output_tokens <±n%>: ...
+- unique_tokens <±n%>: ...
+- api_calls <±n%>: <which lever above the digests show>. EVIDENCE: ...
 - turns <±n%>: ...
 - autonomy <±n asks>: <what each arm actually asked about>. EVIDENCE: ...
 
@@ -278,7 +302,7 @@ Each one a thing a FUTURE run could test, in this exact shape so /optimizer:plan
 without a rewrite. Aim for 2–4; fewer good ones beats a padded list.
 
 - STATEMENT: <a change to the artifact under test, and the mechanism by which it moves a pillar>
-  PILLARS: <comma-separated, from: quality,input_tokens,output_tokens,turns,autonomy>
+  PILLARS: <comma-separated, from: quality,unique_tokens,api_calls,turns,autonomy>
   DIRECTION: improve|regress
   MAGNITUDE: <predicted percent change, integer>
   CONFIDENCE: <0.0-1.0>

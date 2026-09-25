@@ -186,7 +186,7 @@ const COMMANDS = {
   },
 
   classify(root, o) {
-    if (!o.deltas) fail('--deltas <json> is required, e.g. \'{"quality":4,"input_tokens":-12}\'');
+    if (!o.deltas) fail('--deltas <json> is required, e.g. \'{"quality":4,"api_calls":-12}\'');
     const result = classifyOutcome({
       objective: readObjective(root),
       deltas: parseJsonOpt(o.deltas, 'deltas'),
