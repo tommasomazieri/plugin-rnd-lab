@@ -65,7 +65,9 @@ Interview the user (AskUserQuestion, batch related ones). Collect, unless alread
 3. **Common config** — plugins/MCPs BOTH arms share (caveman, context7, ...). Everything both
    arms need must be declared here; arms must not rely on global config (arms run
    `--strict-mcp-config` + explicit `enabledPlugins`).
-4. **Model** — one model, both arms. No exceptions.
+4. **Model and effort** — one model, one effort level (`low|medium|high|xhigh|max`), both arms.
+   No exceptions. Pin the effort: left out, both arms inherit whatever `/effort` or
+   `effortLevel` the operator has on the day each run fires, so runs drift apart unrecorded.
 5. **Seed files** — starting files both workspaces should begin with (can be empty).
 
 For MCP entries: collect the full server definition (command/args/env), not just the name.
@@ -90,6 +92,7 @@ Write `envFile` (the `env.json` the script pointed at):
   "experiment": "<displayName from the script output>",
   "created": "<ISO date>",
   "model": "<model>",
+  "effort": "<effort>",
   "mode": "interactive",
   "pluginUnderTestRepo": "<repoRoot>",
   "artifacts": {

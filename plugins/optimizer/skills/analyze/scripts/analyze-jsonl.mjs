@@ -54,6 +54,12 @@ export function analyzeFile(filePath) {
     models: {},
     turns: { user_real: 0, user_system_reentry: 0, user_tool_results: 0, user_meta: 0, assistant_messages: 0, sidechain_lines: 0 },
     api_calls: 0,
+    // Effort level per API call, from the undocumented top-level `effort` on assistant
+    // entries (observed 2026-09-27; it moves mid-session when a skill or /effort changes it).
+    // `effort_first` is the session's starting level: the opening prompt is answered before
+    // any skill can run, so it is the level launch resolved. 'unrecorded' when the field is gone.
+    effort: {},
+    effort_first: null,
     tokens: ZERO(),
     tokens_by_model: {},
     cost_usd_reported: 0,
@@ -117,7 +123,12 @@ export function analyzeFile(filePath) {
         seenUsageIds.add(usageKey);
         // `<synthetic>` entries are written by Claude Code itself (interrupts, API errors):
         // no request reached the model, so nothing was re-read.
-        if (model !== '<synthetic>') m.api_calls++;
+        if (model !== '<synthetic>') {
+          m.api_calls++;
+          const level = typeof e.effort === 'string' ? e.effort : 'unrecorded';
+          m.effort[level] = (m.effort[level] || 0) + 1;
+          m.effort_first = m.effort_first || level;
+        }
         const bm = (m.tokens_by_model[model] = m.tokens_by_model[model] || ZERO());
         for (const t of [m.tokens, bm]) addUsage(t, usage);
       }
@@ -276,8 +287,9 @@ export function analyzeWithSubagents(transcriptPath) {
 
   // Per model too: a subagent can run on a cheaper model, and pricing it at the parent's
   // rate would misstate the cost of delegating.
-  const total = { tokens: ZERO(), tokens_by_model: {}, tool_calls_total: 0, api_calls: 0 };
+  const total = { tokens: ZERO(), tokens_by_model: {}, tool_calls_total: 0, api_calls: 0, effort: {} };
   for (const m of [self, ...subagents.map((s) => s.metrics)]) {
+    for (const [level, n] of Object.entries(m.effort)) total.effort[level] = (total.effort[level] || 0) + n;
     for (const k of Object.keys(total.tokens)) total.tokens[k] += m.tokens[k] || 0;
     for (const [model, t] of Object.entries(m.tokens_by_model)) {
       const bm = (total.tokens_by_model[model] = total.tokens_by_model[model] || ZERO());

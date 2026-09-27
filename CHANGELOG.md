@@ -1,5 +1,32 @@
 # Changelog
 
+## Effort is held equal across arms, and read back per call
+
+**`optimizer` 0.9.0 → 0.10.0.** Not breaking: an env.json without `effort` fires as before.
+
+The arms pinned the model but not the effort level. Each one inherited the operator's
+`effortLevel`/`modelSettings`, so both arms of a run matched, but a `/effort` change between two
+runs moved every later run in the lab and nothing recorded it. Effort now changes what a run
+costs as much as the model does.
+
+- **`effort` in env.json** (`low|medium|high|xhigh|max`) becomes `--effort` on both arms and
+  `equal.effort` in the parity report. The launcher clears `CLAUDE_CODE_EFFORT_LEVEL`, which
+  overrides `--effort` (code.claude.com/docs/en/env-vars). `/optimizer:init` now asks for it.
+  Unset, the parity report says the arms were unpinned.
+- **`comparison.json` → `effort`**: the level each arm started at and how many API calls ran at
+  each level, subagents included. The level comes from the `effort` field on assistant entries
+  in the transcript, which is undocumented. When it is missing the block says parity is
+  unverified rather than passing it.
+- **Two new parity flags**: `EFFORT PARITY VIOLATION` when the arms started at different
+  levels, and a flag per arm when a pinned level did not land. A mid-session change is never
+  flagged: a skill or subagent with `effort` in its frontmatter moves the level by design, and
+  that is what gets measured.
+- **The comparator knows the mechanisms an artifact can ship**, each verified against the
+  Claude Code docs: `effort` and `model` frontmatter, removing unused tools with a bare-name deny
+  rule or `disallowed-tools` (a pattern rule only blocks, and a blocked attempt still costs a
+  call), a PreToolUse hook that rewrites a call with `updatedInput` instead of blocking it, and
+  a PostToolBatch hook for a "batch your next calls" nudge. Candidate hypotheses name one of these.
+
 ## The token pillars follow the bill: API calls and unique tokens
 
 **`optimizer` 0.8.4 → 0.9.0, `core` 0.1.2 → 0.1.3.** Breaking for a lab whose declared priority

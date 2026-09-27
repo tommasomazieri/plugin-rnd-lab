@@ -35,7 +35,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/launch-pair.mjs" "<configRoot>" "<testenvRoot>
 ```
 
 Then read `runs/run-NNN/.launch/parity-report.json` and show the user a terse summary:
-- what BOTH arms share (model, prompt, common plugins/MCPs)
+- what BOTH arms share (model, effort, prompt, common plugins/MCPs). If `effort` reads
+  `unpinned`, say so: the arms run at the operator's current effort, which is not recorded
+  anywhere a later run can be compared against. The fix is a new env with `effort` set.
 - what ONLY control gets, what ONLY test gets
 - `dod_checks`, `dod_checks_note`, `dod_checks_non_generic`: whether `dod-checks.json` exists
   (warn if missing: run proceeds without DoD tracking), whether control/test check lists differ,

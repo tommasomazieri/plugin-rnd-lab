@@ -12,7 +12,38 @@ import {
   pinsFromManifest,
   promptParity,
   similarity,
+  effortParity,
 } from '../skills/analyze/scripts/compare-runs.mjs';
+import { analyzeFile } from '../skills/analyze/scripts/analyze-jsonl.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+test('analyzeFile counts effort per API call and keeps the starting level', () => {
+  const at = (id, effort, model = 'claude-opus-5-5') =>
+    JSON.stringify({ type: 'assistant', effort, message: { id, model, usage: { output_tokens: 1 }, content: [] } });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'effort-')), 's.jsonl');
+  // msg a is two content-block lines of one call; the synthetic entry reached no model.
+  fs.writeFileSync(file, [at('a', 'xhigh'), at('a', 'xhigh'), at('b', 'low'), at('c', 'xhigh'), at('d', undefined, '<synthetic>')].join('\n'));
+  const m = analyzeFile(file);
+  assert.deepEqual(m.effort, { xhigh: 2, low: 1 });
+  assert.equal(m.effort_first, 'xhigh');
+});
+
+test('effortParity flags a different start or a pin that did not land, never a mid-session shift', () => {
+  const arm = (first, per) => ({ effort_first: first, effort: per, combined: { effort: per } });
+  const same = effortParity('high', arm('high', { high: 5, low: 9 }), arm('high', { high: 14 }));
+  assert.deepEqual(same.flags, [], 'a skill dropping to low mid-session is the thing measured');
+  assert.deepEqual(same.block.per_call.control, { high: 5, low: 9 });
+
+  assert.match(effortParity(null, arm('xhigh', {}), arm('medium', {})).flags[0], /EFFORT PARITY VIOLATION/);
+  const missed = effortParity('medium', arm('xhigh', {}), arm('xhigh', {}));
+  assert.equal(missed.flags.length, 2, 'both arms report the pin that did not land');
+
+  const old = effortParity(null, arm('unrecorded', {}), arm('xhigh', {}));
+  assert.deepEqual(old.flags, []);
+  assert.match(old.block.note, /unverified/);
+});
 
 const metrics = (over = {}) => ({
   api_calls: 7,

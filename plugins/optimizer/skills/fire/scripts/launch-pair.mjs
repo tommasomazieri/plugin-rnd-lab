@@ -36,7 +36,7 @@
  *      arms unconditionally also get DOD_LITE_DIR (plugins/dod-lite, the trimmed hooks-only DoD
  *      engine) appended — mandatory every run, never an env.json opt-in.
  *   8. spawn a detached titled terminal running:
- *      claude --model M --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
+ *      claude --model M [--effort E] --settings S --mcp-config C --strict-mcp-config [--plugin-dir D]* "<PROMPT>"
  *
  * The opening prompt is a fixed constant for parity across arms and across experiments.
  *
@@ -83,6 +83,9 @@ const DOD_LITE_DIR = resolveDodLiteDir(PLUGIN_ROOT);
 const ARMS = ['control', 'test'];
 const OPENING_PROMPT =
   'Read TASK.md in this directory and carry out the assignment exactly as written. Treat TASK.md as your task brief.';
+// The levels skill/subagent frontmatter and `--effort` accept (code.claude.com/docs/en/skills).
+// Checked here because the CLI takes an unknown value without complaint.
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 function fail(msg) {
   console.error(`[optimizer] ERROR: ${msg}`);
@@ -144,6 +147,13 @@ function loadEnv(configRoot) {
   }
   if (!env.experiment) fail('env.json: "experiment" is required');
   if (!env.model) fail('env.json: "model" is required (both arms must run the same model)');
+  // Optional, so env.json files locked before it existed still fire. Unpinned, both arms
+  // inherit the operator's effortLevel/modelSettings of the day: equal within a run, but a
+  // /effort change between runs silently moves every later run in the lab.
+  if (env.effort != null && !EFFORT_LEVELS.includes(env.effort)) {
+    fail(`env.json: "effort" must be one of ${EFFORT_LEVELS.join(', ')} (got "${env.effort}")`);
+  }
+  env.effort = env.effort || null;
   for (const key of ['common', ...ARMS]) {
     env[key] = env[key] || {};
     env[key].plugins = env[key].plugins || [];
@@ -482,7 +492,11 @@ function linkDodFolder(workspace, dodDir) {
  * reaches claude as exactly one argv entry however many spaces and commas it contains.
  */
 function buildClaudeArgs(env, armConfig, settingsFile, mcpFile) {
-  const args = ['--model', env.model, '--settings', settingsFile];
+  const args = ['--model', env.model];
+  // Session level only: skill/subagent `effort` frontmatter still overrides it while active,
+  // so a plugin that routes effort per skill is measured, not flattened.
+  if (env.effort) args.push('--effort', env.effort);
+  args.push('--settings', settingsFile);
   // always strict, even with an empty pool: arms must not fall back to globally configured MCPs
   args.push('--mcp-config', mcpFile, '--strict-mcp-config');
   for (const dir of armConfig.pluginDirs) args.push('--plugin-dir', dir);
@@ -517,6 +531,7 @@ function main() {
   for (const arm of ARMS) composed[arm] = composeArm(env, arm, globalEnabled, baseline);
 
   parity.equal.model = env.model;
+  parity.equal.effort = env.effort || 'unpinned: inherited from the operator\'s settings at launch';
   parity.equal.prompt = OPENING_PROMPT;
   parity.equal.dod_engine = DOD_LITE_DIR;
   parity.equal.common_plugins = env.common.plugins;
@@ -588,6 +603,7 @@ function main() {
     run: runName,
     created_at: new Date().toISOString(),
     model: env.model,
+    effort: env.effort,
     prompt: OPENING_PROMPT,
     arms: {},
   };

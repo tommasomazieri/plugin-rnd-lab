@@ -150,6 +150,29 @@ these the digests show:
   Each is written once, then re-read on every later call. That is a `unique_tokens` finding
   first, and it makes every call more expensive.
 
+When you write a candidate hypothesis, these are the Claude Code mechanisms an artifact can
+ship to act on a lever. Name the one you propose; each was verified against
+code.claude.com/docs on 2026-09-27.
+
+- **`effort` in a skill's or subagent's frontmatter** (`low|medium|high|xhigh|max`) overrides
+  the session level while it is active. Lower effort on a skill whose work is running a script
+  cuts output (`unique_tokens`); higher effort on a judgment skill trades tokens for `quality`
+  or `turns`. `comparison.json` → `effort.per_call` shows how many calls ran at each level in
+  each arm. On most models each effort level has its own cache, so a switch recomputes the whole
+  request and shows up as cache writes. Opus 5.5 and Fable 5.1 keep the cache.
+- **`model` in a subagent's frontmatter.** A cheaper model for read-only or mechanical
+  delegated work. Moves `cost` through `tokens_by_model`, and `quality` if the work needed the
+  stronger model.
+- **Removing a tool the artifact never needs.** A deny rule on a bare tool name, or the
+  skill's `disallowed-tools` field, takes the tool out of the model's context. A pattern rule
+  such as `Bash(git log*)` only blocks, so every attempt still costs a call. If the digest shows
+  blocked calls that were retried, that is an `api_calls` finding.
+- **A PreToolUse hook that rewrites the call (`updatedInput`) instead of blocking it.** The
+  corrected call runs in the same request rather than failing and being retried in the next.
+- **A PostToolBatch hook** runs once after each batch of tool results and can add context
+  before the next request. It is where a "request the next independent calls together" nudge
+  goes, against the one-at-a-time pattern above.
+
 ### Autonomy, specifically
 
 `autonomy.hitl_elective = hitl_total − hitl_harness`, and **only `hitl_elective` is scored**.

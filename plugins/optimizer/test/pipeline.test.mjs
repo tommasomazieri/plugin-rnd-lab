@@ -52,6 +52,23 @@ test('schema 1: env.json with only pluginUnderTestRepo still resolves and fires'
   assert.equal(parity.pins_symmetric, true, 'both arms unpinned means both are at HEAD');
 });
 
+test('an effort pin reaches both arms\' argv and the parity report; a bogus level refuses to fire', () => {
+  const repo = makePluginRepo('demo');
+  const { configRoot, testenvRoot } = makeEnvPair(baseEnv({ pluginUnderTestRepo: repo, effort: 'medium' }));
+  const runDir = makeRun(testenvRoot);
+  node(SCRIPTS.resolveBaseline, [configRoot, testenvRoot, runDir]);
+  node(SCRIPTS.launchPair, [configRoot, testenvRoot, '--dry-run']);
+  assert.equal(readJson(path.join(runDir, '.launch', 'parity-report.json')).equal.effort, 'medium');
+  for (const arm of ['control', 'test']) {
+    const script = fs.readFileSync(path.join(runDir, '.launch', `${arm}.launch${LAUNCH_EXT}`), 'utf8');
+    assert.match(script, /'--effort',? '?medium'/, `${arm}: --effort medium is in the argv`);
+  }
+
+  const bad = makeEnvPair(baseEnv({ pluginUnderTestRepo: repo, effort: 'turbo' }));
+  makeRun(bad.testenvRoot);
+  assert.match(nodeExpectFail(SCRIPTS.launchPair, [bad.configRoot, bad.testenvRoot, '--dry-run']).stderr, /"effort" must be one of/);
+});
+
 test('schema 1: --vanilla gives control no artifacts at all', () => {
   const repo = makePluginRepo('demo');
   const { configRoot, testenvRoot } = makeEnvPair(baseEnv({ pluginUnderTestRepo: repo }));

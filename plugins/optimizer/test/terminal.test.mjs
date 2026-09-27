@@ -110,6 +110,7 @@ test('every dialect keeps the four things a measurable arm depends on', () => {
     assert.match(s, /CLAUDE_CODE_FORCE_SESSION_PERSISTENCE/, `${platform}: forces session persistence`);
     assert.match(s, /NO_COLOR/, `${platform}: scrubs NO_COLOR`);
     assert.match(s, /FORCE_COLOR/, `${platform}: forces colour back on`);
+    assert.match(s, /CLAUDE_CODE_EFFORT_LEVEL/, `${platform}: scrubs the effort override that beats --effort`);
     assert.match(s, /LIB_ROOT/, `${platform}: exports the arm's env`);
     assert.match(s, /AB demo control run-001/, `${platform}: titles the window`);
   }

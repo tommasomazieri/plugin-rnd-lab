@@ -300,6 +300,39 @@ export function pinsFromManifest(manifest) {
   return out;
 }
 
+/**
+ * Effort parity across arms. Only the STARTING level has to match: a plugin whose skills or
+ * subagents set `effort` in frontmatter moves the level mid-session by design, and that shift
+ * is part of what is being measured, so the per-call counts are reported, never flagged.
+ */
+export function effortParity(pinned, control, test) {
+  const flags = [];
+  const start = { control: control.effort_first, test: test.effort_first };
+  const recorded = Object.values(start).every((s) => s && s !== 'unrecorded');
+  if (recorded && start.control !== start.test) {
+    flags.push(`EFFORT PARITY VIOLATION: control started at ${start.control}, test at ${start.test}`);
+  }
+  for (const arm of ARMS) {
+    if (pinned && start[arm] && start[arm] !== 'unrecorded' && start[arm] !== pinned) {
+      flags.push(
+        `${arm} arm: env.json pins effort ${pinned} but its first call ran at ${start[arm]} — the pin did not land ` +
+          '(or the model does not support that level and fell back to the highest one it does).',
+      );
+    }
+  }
+  return {
+    block: {
+      pinned: pinned || null,
+      start,
+      per_call: { control: control.combined?.effort ?? control.effort, test: test.combined?.effort ?? test.effort },
+      note: recorded
+        ? 'per_call counts API calls (arm session + subagents) by the effort they ran at.'
+        : 'at least one arm\'s transcript carries no effort field — effort parity is unverified for this run.',
+    },
+    flags,
+  };
+}
+
 export function compareRun(runDir) {
   const manifestPath = path.join(runDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) fail(`no manifest.json in ${runDir} — run not fired yet`);
@@ -459,6 +492,8 @@ export function compareRun(runDir) {
   const cModels = Object.keys(c.models).sort().join(',');
   const tModels = Object.keys(t.models).sort().join(',');
   if (cModels !== tModels) flags.push(`MODEL PARITY VIOLATION: control=[${cModels}] test=[${tModels}]`);
+  const effort = effortParity(manifest.effort, c, t);
+  flags.push(...effort.flags);
 
   // The single question an A/B run exists to answer is whether the plugin changed anything.
   // If the test arm never invoked it, no delta this run can be credited to it — and that is
@@ -557,6 +592,7 @@ export function compareRun(runDir) {
       test: cost.test,
       delta_pct: pct(cost.test.usd, cost.control.usd),
     },
+    effort: effort.block,
     totals: {
       control: summarize(c),
       test: summarize(t),

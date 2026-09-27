@@ -112,6 +112,8 @@ export function launchScriptExt(platform = process.platform) {
  *     background-launcher case (code.claude.com/docs/en/env-vars).
  *   - NO_COLOR is set in the environment of tool subprocesses, so the arm's TUI comes up
  *     monochrome. Verified process-scoped, not machine configuration.
+ *   - CLAUDE_CODE_EFFORT_LEVEL overrides `--effort` (code.claude.com/docs/en/env-vars), so
+ *     an operator's shell export would silently beat env.json's effort pin on both arms.
  * Scrubbed in the script rather than in the spawn env on purpose: the arm window must
  * look the same whether it was fired from a session, a bare shell, or CI.
  */
@@ -134,6 +136,7 @@ function buildPowerShellScript({ workspace, armEnv, claudeArgs, title }) {
     '$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = "1"',
     'Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue',
     'Remove-Item Env:CLICOLOR -ErrorAction SilentlyContinue',
+    'Remove-Item Env:CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue',
     '$env:FORCE_COLOR = "1"',
     '$env:CLICOLOR_FORCE = "1"',
     `Set-Location -LiteralPath ${psQuote(workspace)}`,
@@ -151,6 +154,7 @@ function buildPosixScript({ workspace, armEnv, claudeArgs, title }) {
     'export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1',
     'unset NO_COLOR',
     'unset CLICOLOR',
+    'unset CLAUDE_CODE_EFFORT_LEVEL',
     'export FORCE_COLOR=1',
     'export CLICOLOR_FORCE=1',
     // OSC 0 is how every terminal emulator worth supporting takes a title — Terminal.app,

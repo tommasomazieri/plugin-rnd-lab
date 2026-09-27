@@ -102,6 +102,11 @@ against it.
 
 - Both arms: same model, same opening prompt (fixed constant), same seed files, same task.md,
   `--strict-mcp-config` + explicit `enabledPlugins` (no global-config bleed).
+- Same effort: env.json `effort` becomes `--effort` on both arms, and the launcher clears
+  `CLAUDE_CODE_EFFORT_LEVEL`, which would override it. Left unset, the arms inherit the
+  operator's effort at launch. `/optimizer:analyze` reads the level every API call actually ran
+  at, flags arms that started at different levels or missed the pin, and reports per-call counts
+  (a skill with `effort` frontmatter moving the level mid-session is measured, not flagged).
 - Arms differ ONLY in the `control`/`test` blocks of env.json. **DoD checks are identical across
   both arms** — same ids, all `source: "generic"`. `.launch/parity-report.json` records any
   divergence per run (`dod_checks_asymmetric`, `dod_checks_non_generic`) and `/optimizer:fire`
