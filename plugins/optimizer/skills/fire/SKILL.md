@@ -1,4 +1,5 @@
 ---
+effort: low
 description: >-
   Fire the planned A/B run: launch the control and test Claude Code sessions in two
   detached terminals with everything-else-equal configs. User-invoke only (side effects:

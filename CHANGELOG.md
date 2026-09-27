@@ -26,6 +26,10 @@ costs as much as the model does.
   rule or `disallowed-tools` (a pattern rule only blocks, and a blocked attempt still costs a
   call), a PreToolUse hook that rewrites a call with `updatedInput` instead of blocking it, and
   a PostToolBatch hook for a "batch your next calls" nudge. Candidate hypotheses name one of these.
+- **`effort: low` on optimizer's own script-driven skills**: `fire`, `status`, `setup`,
+  `paper`. Each runs a script and checks its output against a fixed list. Applied without an A/B
+  run. `init` keeps the session level, because it is an interview that writes the env.json
+  every later run depends on.
 
 ## The token pillars follow the bill: API calls and unique tokens
 

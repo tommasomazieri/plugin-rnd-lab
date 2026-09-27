@@ -1,4 +1,5 @@
 ---
+effort: low
 description: >-
   Show the state of the optimizer experiment tracked in the repo you're CD'd into: current
   mandate/env, which runs are planned/fired/linked/analyzed, session ids per arm, parity

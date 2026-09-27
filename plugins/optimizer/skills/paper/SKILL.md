@@ -1,4 +1,5 @@
 ---
+effort: low
 description: >-
   Generate lab/paper.md — the written account of how the subject under test got to where it
   is, assembled from the objective's history, the hypothesis ledger, the findings, the

@@ -1,4 +1,5 @@
 ---
+effort: low
 description: >-
   Configure (or change) optimizer's experiments root: the one folder on this
   machine where every A/B experiment environment gets created and reused
